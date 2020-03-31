@@ -3,6 +3,7 @@ import * as React from "react"
 
 import sun from "../assets/sun.png"
 import grass from "../assets/grass.png"
+import stars from "../assets/stars.png"
 console.log(sun, "sun")
 console.log(grass, "grass")
 
@@ -44,6 +45,12 @@ const renderSky: renderSky = ({ context, time }) => {
   context.fillRect(50, 0, 50, 50)
   context.font = "30px Open Sans Mono"
   context.fillText(`Time: ${(t * 100).toFixed(1)}%; Red: ${red.toFixed(1)}; Blue: ${blue.toFixed(1)}`, 100, 40)
+
+  const image = new Image()
+  image.src = stars
+  context.filter = `opacity(${(blue - 0.1) / 0.9})`
+
+  context.drawImage(image, x, y, 150, 150)
 }
 
 type renderSun = (state: GameState) => void
