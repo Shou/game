@@ -48,7 +48,7 @@ const renderSky: renderSky = ({ context, time }) => {
 
   const image = new Image()
   image.src = stars
-  context.filter = `opacity(${(blue - 0.1) / 0.9})`
+  context.filter = `opacity(${(blue - 0.1) / 0.9 * 100}%)`
 
   context.drawImage(image, x, y, 150, 150)
 }
