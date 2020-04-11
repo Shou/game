@@ -4,6 +4,9 @@
   "description": "Game lol",
   "main": "src/index.tsx",
   "dependencies": {
+    "@types/lodash": "^4.14.149",
+    "prando": "^5.1.2",
+    "range": "0.0.3",
     "react": "^16.13.1",
     "react-dom": "^16.13.1",
     "ts-loader": "^6.2.2",
