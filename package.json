@@ -33,7 +33,7 @@
     "webpack-dev-server": "^3.10.3"
   },
   "scripts": {
-    "watch": "webpack-dev-server --mode development",
+    "watch": "webpack-dev-server --mode development --config webpack.config.js",
     "test-watch": "webpack --mode development --config webpack.test.js --watch",
     "test": "node dist/test.js"
   },

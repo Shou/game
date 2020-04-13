@@ -1,6 +1,5 @@
-
 const path = require("path")
-const config = require("./webpack.config.js")
+const config = require("./webpack.common.js")
 
 module.exports = Object.assign(config, {
   entry: "./src/index.test.ts",
