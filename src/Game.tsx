@@ -104,7 +104,7 @@ export type UserSettings = {
 }
 
 export interface ActiveKeys {
-  keys: { [key: string]: number },
+  [key: string]: number
 }
 
 export type Player = Coord & Dimensions
@@ -589,18 +589,16 @@ export type attachKeyEvents = (
   scopedState: ScopedState<GameState>,
 ) => void
 export const attachKeyEvents: attachKeyEvents = (scopedState) => {
-  let activeKeys: ActiveKeys = {
-    keys: {},
-  }
+  let activeKeys: ActiveKeys = {}
   window.addEventListener("keydown", (event) => {
-    if (!(event.key in activeKeys.keys)) {
+    if (!(event.key in activeKeys)) {
       const { time } = scopedState.getState()
-      activeKeys.keys[event.key] = time
+      activeKeys[event.key] = time
       setPartialState(scopedState, { activeKeys })
     }
   })
   window.addEventListener("keyup", (event) => {
-    delete activeKeys.keys[event.key]
+    delete activeKeys[event.key]
     setPartialState(scopedState, { activeKeys })
   })
 }
@@ -624,19 +622,19 @@ export const movement: movement = (state, gameElements) => {
   } = state
 
   const halfPiFraction: (k: string) => number = k =>
-    Math.min(1000, time - state.activeKeys.keys[k]) / 1000 * Math.PI * 0.5
+    Math.min(1000, time - state.activeKeys[k]) / 1000 * Math.PI * 0.5
 
-  const moveUp = up in state.activeKeys.keys
-    ? Math.sin(halfPiFraction(up)) * -1
+  const moveUp = up in state.activeKeys
+    ? Math.sin(halfPiFraction(up)) * -10
     : 0
-  const moveLeft = left in state.activeKeys.keys
-    ? Math.sin(halfPiFraction(left)) * -1
+  const moveLeft = left in state.activeKeys
+    ? Math.sin(halfPiFraction(left)) * -10
     : 0
-  const moveDown = down in state.activeKeys.keys
-    ? Math.sin(halfPiFraction(down)) * 1
+  const moveDown = down in state.activeKeys
+    ? Math.sin(halfPiFraction(down)) * 10
     : 0
-  const moveRight = right in state.activeKeys.keys
-    ? Math.sin(halfPiFraction(right)) * 1
+  const moveRight = right in state.activeKeys
+    ? Math.sin(halfPiFraction(right)) * 10
     : 0
 
   const move = {
@@ -655,14 +653,16 @@ export const movement: movement = (state, gameElements) => {
 
     return gameElements.reduce((accMove, elem) => {
       const [ vectorX, vectorY ] = [
-        elem.x - player.x,
-        elem.y - player.y,
+        player.x - elem.x,
+        player.y - elem.y,
       ]
       const collidingCourse = dot(
-        [accMove.x, accMove.y],
+        [accMove.x / 10, accMove.y / 10],
         [vectorX, vectorY],
       )
 
+      console.log(`vx: ${vectorX}, vy: ${vectorY}`)
+      console.log(collidingCourse, "collidingCourse")
       if (collidingCourse <= 0.5) {
         return accMove
       } else {
@@ -675,6 +675,7 @@ export const movement: movement = (state, gameElements) => {
         const diffY = playerCenter.y - elemCenter.y
         const gapY = diffY - elem.height * 0.5 - player.height * 0.5
 
+        console.log(`gapY: ${gapY}, gapX: ${gapX}`, "gaps")
         if (gapX >= 0 && gapY >= 0) {
           return {
             x: accMove.x - gapX,
@@ -684,7 +685,7 @@ export const movement: movement = (state, gameElements) => {
           return accMove
         }
       }
-    }, { x: move.x * 10, y: move.y * 10 })
+    }, move)
   }
 }
 
@@ -709,9 +710,7 @@ export const initGame = (context: CanvasRenderingContext2D) => {
     },
     screenPosition: { x: 0, y: 0 },
     settings: defaultSettings,
-    activeKeys: {
-      keys: {},
-    },
+    activeKeys: {},
     move: { x: 0, y: 0 },
   })
 
