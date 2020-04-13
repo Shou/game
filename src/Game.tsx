@@ -10,70 +10,70 @@ import cloud1 from "../assets/cloud1.png"
 import cloud2 from "../assets/cloud2.png"
 
 
-interface Coord {
+export interface Coord {
   x: number
   y: number
 }
 
-interface Dimensions {
+export interface Dimensions {
   width: number
   height: number
 }
 
-interface Style {
+export interface Style {
   style?: string
 }
 
-interface Filter {
+export interface Filter {
   filter?: string
 }
 
-type CoreElement = {
+export type CoreElement = {
   collidable: boolean,
   movementFactors: Coord,
 } & Coord & Dimensions & Filter
 
-type GameImage = {
+export type GameImage = {
   _tag: "GameImage",
   image: HTMLImageElement,
 } & CoreElement & Style
 
-type GameText = {
+export type GameText = {
   _tag: "GameText",
   font: string,
   text: string,
 } & CoreElement & Style
 
-type GameRect = {
+export type GameRect = {
   _tag: "GameRect",
 } & CoreElement & Style
 
-interface GradientStop {
+export interface GradientStop {
   offset: number
   color: string
 }
 
-type GameLinearGradient = {
+export type GameLinearGradient = {
   _tag: "GameLinearGradient"
   colorStops: Array<GradientStop>
   start: Coord
   stop: Coord
 } & CoreElement
 
-type GameElement
+export type GameElement
   = GameImage
   | GameText
   | GameRect
   | GameLinearGradient
 
-type GameLayers = Array<GameElement>
+export type GameElements = Array<GameElement>
 
-interface Collidable {
+export interface Collidable {
   _tag: "Collidable",
   element: GameElement
 }
 
-interface Keybindings {
+export interface Keybindings {
   up: any,
   left: any,
   down: any,
@@ -81,12 +81,12 @@ interface Keybindings {
   jump: any,
 }
 
-interface Settings {
+export interface Settings {
   keybindings: Keybindings
   seed: number
 }
 
-const defaultSettings = {
+export const defaultSettings = {
   keybindings: {
     up: "w",
     left: "a",
@@ -97,17 +97,17 @@ const defaultSettings = {
   seed: Math.floor(Math.random() * 10)
 }
 
-type UserSettings = {
+export type UserSettings = {
   [K in keyof Settings]?: {
     [Sk in keyof Settings[K]]: Settings[K][Sk]
   }
 }
 
-interface ActiveKeys {
+export interface ActiveKeys {
   keys: { [key: string]: number },
 }
 
-interface GameState {
+export interface GameState {
   context: CanvasRenderingContext2D
   time: number
   lastFrame: number
@@ -118,12 +118,12 @@ interface GameState {
   move: Coord
 }
 
-interface ScopedState<A> {
+export interface ScopedState<A> {
   getState: () => A
   setState: (state: A) => void
 }
 
-const createState: <A>(state: A) => ScopedState<A> = (state) => {
+export const createState: <A>(state: A) => ScopedState<A> = (state) => {
   // why does typescript hate me
   let o: { state: any } = {
     state
@@ -134,12 +134,11 @@ const createState: <A>(state: A) => ScopedState<A> = (state) => {
   }
 }
 
-type setPartialState = <A>(
+export type setPartialState = <A>(
   scopedState: ScopedState<A>,
   partialState: { [K in keyof A]?: A[K] },
 ) => void
-
-const setPartialState: setPartialState = (
+export const setPartialState: setPartialState = (
   scopedState,
   partialState,
 ) => {
@@ -152,36 +151,39 @@ const setPartialState: setPartialState = (
   )
 }
 
-type merge = <R>(
+export type merge = <R>(
   left: { [Kl in keyof R]: any },
   right: { [Kr in keyof R]: any },
 ) => R
-const merge: merge = (left, right) => {
+export const merge: merge = (left, right) => {
   return left
 }
 
 
 // 60 seconds
-const DAY_CYCLE: number = 60 * Math.pow(10, 3)
+export const DAY_CYCLE: number = 60 * Math.pow(10, 3)
 
-const sunImage = new Image()
+export const sunImage = new Image()
 sunImage.src = sun
-const grassImage = new Image()
+export const grassImage = new Image()
 grassImage.src = grass
-const starsImage = new Image()
+export const starsImage = new Image()
 starsImage.src = stars
-const cloudImages = [cloud1, cloud2].map(cloud => {
+export const cloudImages = [cloud1, cloud2].map(cloud => {
   const image = new Image()
   image.src = cloud
   return image
 })
 
+export type dot = (left: Array<number>, right: Array<number>) => number
+export const dot: dot = (left, right) =>
+  left.reduce((acc, a, i) => acc + a * right[i], 0)
 
-type renderGameElement = (
+export type renderGameElement = (
   context: CanvasRenderingContext2D,
   gameElement: GameElement,
 ) => void
-const renderGameElement: renderGameElement = (context, gameElement) => {
+export const renderGameElement: renderGameElement = (context, gameElement) => {
   if ("style" in gameElement && gameElement.style != null) {
     context.fillStyle = gameElement.style
   }
@@ -232,10 +234,10 @@ const renderGameElement: renderGameElement = (context, gameElement) => {
   }
 }
 
-const brightness: (t: number) => number = t => Math.min(100, Math.max(0.3, Math.sin(t * Math.PI * 1.8 - 1.4) * 2) * 100)
+export const brightness: (t: number) => number = t => Math.min(100, Math.max(0.3, Math.sin(t * Math.PI * 1.8 - 1.4) * 2) * 100)
 
-type renderSky = (state: GameState) => GameLayers
-const renderSky: renderSky = ({ context, time }) => {
+export type renderSky = (state: GameState) => GameElements
+export const renderSky: renderSky = ({ context, time }) => {
   const t = (time % DAY_CYCLE) / DAY_CYCLE
 
   // wizard magic
@@ -244,7 +246,7 @@ const renderSky: renderSky = ({ context, time }) => {
     ? Math.max(0, Math.sin(t * Math.PI * 2 * 8)) * 255
     : 0
   // h n = max 0 $ sin (n * pi * 2 / 2 - 0.075) * 255 - 128
-  const green = Math.max(0, Math.sin(t * Math.PI * 2 / 2 - 0.075) * 255 - 128)
+  const green = Math.max(0, Math.sin(t * Math.PI * 2 * 0.5 - 0.075) * 255 - 128)
   // f n = min 255 $ max 0.1 (sin (n * pi * 1.8 - 1.4) * 2) * 255
   const blue = Math.min(255, Math.max(0.1, Math.sin(t * Math.PI * 1.8 - 1.4) * 2) * 255)
 
@@ -252,7 +254,7 @@ const renderSky: renderSky = ({ context, time }) => {
     _tag: "GameLinearGradient",
     colorStops: [
       { offset: 0, color: `rgb(0,${green},${blue})` },
-      { offset: 1 - (red / 255 / 2), color: `rgb(0,${green},${blue})` },
+      { offset: 1 - (red / 255 * 0.5), color: `rgb(0,${green},${blue})` },
       { offset: 1, color: `rgb(183, 29, 22)` },
     ],
     start: { x: 0, y: 0 },
@@ -283,15 +285,15 @@ const renderSky: renderSky = ({ context, time }) => {
   ]
 }
 
-type renderSun = (state: GameState) => GameLayers
-const renderSun: renderSun = ({ context, time }) => {
+export type renderSun = (state: GameState) => GameElements
+export const renderSun: renderSun = ({ context, time }) => {
   const t = (time % DAY_CYCLE) / DAY_CYCLE
   const [width, height] = [150, 150]
-  const radius = Math.min(context.canvas.width, context.canvas.height) / 1.5
-  const [originX, originY] = [context.canvas.width / 2, context.canvas.height - 1]
+  const radius = Math.min(context.canvas.width, context.canvas.height) * 0.67
+  const [originX, originY] = [context.canvas.width * 0.5, context.canvas.height - 1]
   const [x, y] = [
-    Math.sin(Math.PI * 2 * t) * radius + originX - width / 2,
-    Math.cos(Math.PI * 2 * t) * radius + originY - width / 2,
+    Math.sin(Math.PI * 2 * t) * radius + originX - width * 0.5,
+    Math.cos(Math.PI * 2 * t) * radius + originY - width * 0.5,
   ]
 
   const sun: GameImage = {
@@ -309,12 +311,12 @@ const renderSun: renderSun = ({ context, time }) => {
   return [ sun ]
 }
 
-type renderClouds = (state: GameState) => GameLayers
-const renderClouds: renderClouds = ({ context, time }) => {
+export type renderClouds = (state: GameState) => GameElements
+export const renderClouds: renderClouds = ({ context, time }) => {
   const t = (time % DAY_CYCLE) / DAY_CYCLE
   const [width, height] = [300, 300]
   const deltaX = time / 1000 * 2
-  const [x, y] = [context.canvas.width / 2 - deltaX, 100]
+  const [x, y] = [context.canvas.width * 0.5 - deltaX, 100]
   const cloud: GameImage = {
     _tag: "GameImage",
     image: cloudImages[1],
@@ -331,11 +333,11 @@ const renderClouds: renderClouds = ({ context, time }) => {
 }
 
 // NOTE: will return _at least_ one coord object
-type randomWalk = (
+export type randomWalk = (
   seed: number,
   xMax: number,
 ) => Array<Coord>
-const randomWalk: randomWalk = (seed, xMax) => {
+export const randomWalk: randomWalk = (seed, xMax) => {
   const rng = new Prando(seed * xMax)
   const x = Math.round(rng.next(1, Math.min(xMax, 10)))
   const y = Math.round(rng.next(-3, 3))
@@ -347,12 +349,11 @@ const randomWalk: randomWalk = (seed, xMax) => {
 }
 
 let grasses: Array<GameRect> = []
-type renderGrass = (state: GameState) => GameLayers
-const renderGrass: renderGrass = ({ context, time, settings }) => {
+export type renderGrass = (state: GameState) => GameElements
+export const renderGrass: renderGrass = ({ context, time, settings }) => {
   const t = (time % DAY_CYCLE) / DAY_CYCLE
 
   const [width, height] = [100, 100]
-  const quantity = Math.ceil(context.canvas.width / 100)
 
   // evil state
   // TODO move map generation into GameState
@@ -389,26 +390,26 @@ const renderGrass: renderGrass = ({ context, time, settings }) => {
         collidable: true,
       }))
       return acc.concat(wall.concat(floor))
-    }, [] as Array<GameRect>)
+    }, [] as Array<GameRect>).map(elem => ({
+      ...elem,
+      y: elem.y + context.canvas.height
+    }))
   }
 
-  return grasses as GameLayers
+  return grasses as GameElements
 }
 
-type renderPlayer = (gameState: GameState) => GameLayers
-const renderPlayer: renderPlayer = ({ context }) => {
+export type renderPlayer = (gameState: GameState) => GameElements
+export const renderPlayer: renderPlayer = ({ playerPosition }) => {
   const [width, height] = [50, 150]
-  const [x, y] = [
-    context.canvas.width / 2 - width / 2,
-    context.canvas.height / 2 - height / 2,
-  ]
+  const { x, y } = playerPosition
   const player: GameRect = {
     _tag: "GameRect",
     x, y,
     width, height,
     style: `rgba(0,0,0,0.5)`,
     collidable: true,
-    movementFactors: { x: 0, y: 0 },
+    movementFactors: { x: 1, y: 1 },
   }
   const outline: GameRect = {
     _tag: "GameRect",
@@ -427,8 +428,8 @@ const renderPlayer: renderPlayer = ({ context }) => {
 }
 
 let fpsState = [Date.now()]
-type renderDebug = (gameState: GameState) => GameLayers
-const renderDebug: renderDebug = (state) => {
+export type renderDebug = (gameState: GameState) => GameElements
+export const renderDebug: renderDebug = (state) => {
   const {
     context,
     time,
@@ -514,7 +515,7 @@ const renderDebug: renderDebug = (state) => {
   ]
 }
 
-const gameLayers = [
+export const gameLayers = [
   renderSky,
   renderSun,
   renderClouds,
@@ -523,9 +524,28 @@ const gameLayers = [
   renderPlayer,
 ]
 
-type renderThoseLayers = (state: GameState) => void
-const renderThoseLayers: renderThoseLayers = (state) => {
-  const layers = gameLayers.map(layer => {
+export type renderThoseLayers = (state: GameState, elems: GameElements) => void
+export const renderThoseLayers: renderThoseLayers = (state, elems) => {
+  const {
+    screenPosition: { x: screenX, y: screenY }
+  } = state
+  elems.forEach(gameElement => {
+    const {
+      x,
+      y,
+      movementFactors: { x: moveX, y: moveY },
+    } = gameElement
+    renderGameElement(state.context, {
+      ...gameElement,
+      x: x - screenX * moveX,
+      y: y - screenY * moveY,
+    })
+  })
+}
+
+export type getGameElements = (state: GameState) => GameElements
+export const getGameElements: getGameElements = (state) => {
+  return gameLayers.map(layer => {
     try {
       return layer(state)
     } catch(e) {
@@ -533,8 +553,12 @@ const renderThoseLayers: renderThoseLayers = (state) => {
       return []
     }
   }).flat()
+}
 
-  const visibleElems = layers.filter(elem => {
+// TODO remove debug border/padding of 150px
+export type getVisibleElems = (state: GameState, layers: GameElements) => GameElements
+export const getVisibleElems: getVisibleElems = (state, layers) => {
+  return layers.filter(elem => {
     const {
       x, y,
       width, height,
@@ -558,27 +582,12 @@ const renderThoseLayers: renderThoseLayers = (state) => {
         && (y - height * 2) <= (screenY * moveY) + canvas.height - 300
     return bottomCornerVisible && topCornerVisible
   })
-
-  const {
-    screenPosition: { x: screenX, y: screenY }
-  } = state
-  visibleElems.forEach(gameElement => {
-    const ge = { ...gameElement }
-    const {
-      x,
-      y,
-      movementFactors: { x: moveX, y: moveY },
-    } = ge
-    ge.x = x - screenX * moveX
-    ge.y = y - screenY * moveY
-    renderGameElement(state.context, ge)
-  })
 }
 
-type attachKeyEvents = (
+export type attachKeyEvents = (
   scopedState: ScopedState<GameState>,
 ) => void
-const attachKeyEvents: attachKeyEvents = (scopedState) => {
+export const attachKeyEvents: attachKeyEvents = (scopedState) => {
   let activeKeys: ActiveKeys = {
     keys: {},
   }
@@ -595,8 +604,9 @@ const attachKeyEvents: attachKeyEvents = (scopedState) => {
   })
 }
 
-type movement = (state: GameState) => Coord
-const movement: movement = (state) => {
+// TODO collision detection
+export type movement = (state: GameState, gameElements: GameElements) => Coord
+export const movement: movement = (state, gameElements) => {
   const {
     time,
     settings: {
@@ -607,34 +617,84 @@ const movement: movement = (state) => {
         right,
       },
     },
+    context: { canvas },
+    screenPosition: screen
   } = state
 
-  const f: (k: string) => number = k =>
-    Math.min(1000, time - state.activeKeys.keys[k]) / 1000 * Math.PI / 2
+  const halfPiFraction: (k: string) => number = k =>
+    Math.min(1000, time - state.activeKeys.keys[k]) / 1000 * Math.PI * 0.5
 
   const moveUp = up in state.activeKeys.keys
-    ? Math.sin(f(up)) * -10
+    ? Math.sin(halfPiFraction(up)) * -1
     : 0
   const moveLeft = left in state.activeKeys.keys
-    ? Math.sin(f(left)) * -10
+    ? Math.sin(halfPiFraction(left)) * -1
     : 0
   const moveDown = down in state.activeKeys.keys
-    ? Math.sin(f(down)) * 10
+    ? Math.sin(halfPiFraction(down)) * 1
     : 0
   const moveRight = right in state.activeKeys.keys
-    ? Math.sin(f(right)) * 10
+    ? Math.sin(halfPiFraction(right)) * 1
     : 0
 
-  const x = moveLeft + moveRight
-  const y = moveUp + moveDown
+  const move = {
+    x: moveLeft + moveRight,
+    y: moveUp + moveDown,
+  }
 
-  return {
-    x,
-    y,
+  if (move.x === 0 && move.y === 0) {
+    return move
+
+  } else {
+    const player = {
+      x: screen.x + canvas.width * 0.5,
+      y: screen.y + canvas.height * 0.5,
+      width: 50,
+      height: 100,
+      center: { x: 0, y: 0 },
+    }
+    // smh no recursive declarations #nixgang
+    player.center = {
+      x: player.x + player.width * 0.5,
+      y: player.y + player.height * 0.5,
+    }
+
+    return gameElements.reduce((accMove, elem) => {
+      const [ vectorX, vectorY ] = [
+        elem.x - player.x,
+        elem.y - player.y,
+      ]
+      const collidingCourse = dot(
+        [accMove.x, accMove.y],
+        [vectorX, vectorY],
+      )
+
+      if (collidingCourse <= 0.5) {
+        return accMove
+      } else {
+        const elemCenter: Coord = {
+          x: elem.x + elem.width * 0.5,
+          y: elem.y + elem.height * 0.5,
+        }
+        const diffX = player.center.x - elemCenter.x
+        const gapX = diffX - elem.width * 0.5 - player.width * 0.5
+        const diffY = player.center.y - elemCenter.y
+        const gapY = diffY - elem.height * 0.5 - player.height * 0.5
+
+        if (gapX >= 0 && gapY >= 0) {
+          return {
+            x: accMove.x - gapX,
+            y: accMove.x - gapY,
+          }
+        } else {
+          return accMove
+        }
+      }
+    }, { x: move.x * 10, y: move.y * 10 })
   }
 }
 
-const initGame = (context: CanvasRenderingContext2D) => {
+export const initGame = (context: CanvasRenderingContext2D) => {
   const userSettings: UserSettings = (() => {
     try {
       return JSON.parse(localStorage.getItem("game/user-settings") || "{}")
@@ -647,7 +707,10 @@ const initGame = (context: CanvasRenderingContext2D) => {
     context,
     time: 0,
     lastFrame: 0,
-    playerPosition: { x: context.canvas.width / 2, y: 0 },
+    playerPosition: {
+      x: context.canvas.width * 0.5,
+      y: context.canvas.height * 0.5,
+    },
     screenPosition: { x: 0, y: 0 },
     settings: defaultSettings,
     activeKeys: {
@@ -664,25 +727,33 @@ const initGame = (context: CanvasRenderingContext2D) => {
     const delta = now - state.lastFrame
     state.time = now
 
+    const gameElements = getGameElements(state)
     const {
       x: moveX,
       y: moveY,
-    } = movement(state)
+    } = movement(state, gameElements)
 
     if (delta > 75) {
-      renderThoseLayers({
+      const movedState = {
         ...state,
         move: {
           x: moveX,
           y: moveY,
         },
-      })
+      }
+      const visibleElements = getVisibleElems(movedState, gameElements)
+
+      renderThoseLayers(movedState, visibleElements)
       state.lastFrame = now
     }
 
     setPartialState(scopedState, {
       time: state.time,
       lastFrame: state.lastFrame,
+      playerPosition: {
+        x: state.playerPosition.x + moveX,
+        y: state.playerPosition.y + moveY,
+      },
       screenPosition: {
         x: state.screenPosition.x + moveX,
         y: state.screenPosition.y + moveY,
@@ -693,8 +764,8 @@ const initGame = (context: CanvasRenderingContext2D) => {
   window.requestAnimationFrame(renderFrame)
 }
 
-type Game = () => React.ReactElement
-const Game: Game = () => {
+export type Game = () => React.ReactElement
+export const Game: Game = () => {
   const canvasRef = React.useRef<
     HTMLCanvasElement | null
   >(null)
