@@ -1,6 +1,6 @@
 
 import "jsdom-global/register"
-import * as Game from "./Game"
+import * as Game from "../src/Game"
 
 interface Test {
   name: string
@@ -25,9 +25,11 @@ const defaultGameState: Game.GameState = {
   context,
   time: 0,
   lastFrame: 0,
-  playerPosition: {
+  player: {
     x: context.canvas.width * 0.5,
     y: context.canvas.height * 0.5,
+    width: 50,
+    height: 100,
   },
   screenPosition: { x: 0, y: 0 },
   settings: Game.defaultSettings,

@@ -107,11 +107,13 @@ export interface ActiveKeys {
   keys: { [key: string]: number },
 }
 
+export type Player = Coord & Dimensions
+
 export interface GameState {
   context: CanvasRenderingContext2D
   time: number
   lastFrame: number
-  playerPosition: Coord
+  player: Player
   screenPosition: Coord
   settings: Settings
   activeKeys: ActiveKeys
@@ -400,10 +402,9 @@ export const renderGrass: renderGrass = ({ context, time, settings }) => {
 }
 
 export type renderPlayer = (gameState: GameState) => GameElements
-export const renderPlayer: renderPlayer = ({ playerPosition }) => {
-  const [width, height] = [50, 150]
-  const { x, y } = playerPosition
-  const player: GameRect = {
+export const renderPlayer: renderPlayer = ({ player }) => {
+  const { x, y, width, height } = player
+  const playerElem: GameRect = {
     _tag: "GameRect",
     x, y,
     width, height,
@@ -411,7 +412,7 @@ export const renderPlayer: renderPlayer = ({ playerPosition }) => {
     collidable: true,
     movementFactors: { x: 1, y: 1 },
   }
-  const outline: GameRect = {
+  const outlineElem: GameRect = {
     _tag: "GameRect",
     x: x - 5,
     y: y - 5,
@@ -419,11 +420,11 @@ export const renderPlayer: renderPlayer = ({ playerPosition }) => {
     height: height + 10,
     style: `rgba(255,255,255,0.5)`,
     collidable: true,
-    movementFactors: { x: 0, y: 0 },
+    movementFactors: { x: 1, y: 1 },
   }
   return [
-    outline,
-    player,
+    outlineElem,
+    playerElem,
   ]
 }
 
@@ -433,7 +434,7 @@ export const renderDebug: renderDebug = (state) => {
   const {
     context,
     time,
-    playerPosition,
+    player,
     screenPosition,
   } = state
   const t = (time % DAY_CYCLE) / DAY_CYCLE
@@ -470,7 +471,7 @@ export const renderDebug: renderDebug = (state) => {
   const playerText: GameText = {
     _tag: "GameText",
     font: "30px Open Sans Mono",
-    text: `Player: ${playerPosition.x} x ${playerPosition.y}`,
+    text: `Player: ${player.x} x ${player.y}`,
     style: "white",
     x: 25,
     y: 80,
@@ -618,7 +619,8 @@ export const movement: movement = (state, gameElements) => {
       },
     },
     context: { canvas },
-    screenPosition: screen
+    screenPosition: screen,
+    player,
   } = state
 
   const halfPiFraction: (k: string) => number = k =>
@@ -646,15 +648,7 @@ export const movement: movement = (state, gameElements) => {
     return move
 
   } else {
-    const player = {
-      x: screen.x + canvas.width * 0.5,
-      y: screen.y + canvas.height * 0.5,
-      width: 50,
-      height: 100,
-      center: { x: 0, y: 0 },
-    }
-    // smh no recursive declarations #nixgang
-    player.center = {
+    const playerCenter = {
       x: player.x + player.width * 0.5,
       y: player.y + player.height * 0.5,
     }
@@ -676,9 +670,9 @@ export const movement: movement = (state, gameElements) => {
           x: elem.x + elem.width * 0.5,
           y: elem.y + elem.height * 0.5,
         }
-        const diffX = player.center.x - elemCenter.x
+        const diffX = playerCenter.x - elemCenter.x
         const gapX = diffX - elem.width * 0.5 - player.width * 0.5
-        const diffY = player.center.y - elemCenter.y
+        const diffY = playerCenter.y - elemCenter.y
         const gapY = diffY - elem.height * 0.5 - player.height * 0.5
 
         if (gapX >= 0 && gapY >= 0) {
@@ -707,9 +701,11 @@ export const initGame = (context: CanvasRenderingContext2D) => {
     context,
     time: 0,
     lastFrame: 0,
-    playerPosition: {
+    player: {
       x: context.canvas.width * 0.5,
       y: context.canvas.height * 0.5,
+      width: 50,
+      height: 100,
     },
     screenPosition: { x: 0, y: 0 },
     settings: defaultSettings,
@@ -750,9 +746,11 @@ export const initGame = (context: CanvasRenderingContext2D) => {
     setPartialState(scopedState, {
       time: state.time,
       lastFrame: state.lastFrame,
-      playerPosition: {
-        x: state.playerPosition.x + moveX,
-        y: state.playerPosition.y + moveY,
+      player: {
+        x: state.player.x + moveX,
+        y: state.player.y + moveY,
+        width: state.player.width,
+        height: state.player.height,
       },
       screenPosition: {
         x: state.screenPosition.x + moveX,

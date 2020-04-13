@@ -35,7 +35,7 @@
   "scripts": {
     "watch": "webpack-dev-server --mode development --config webpack.config.js",
     "test-watch": "webpack --mode development --config webpack.test.js --watch",
-    "test": "node dist/test.js"
+    "test": "node dist-test/test.js"
   },
   "keywords": [
     "game"
