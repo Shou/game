@@ -1,6 +1,7 @@
 
 import "jsdom-global/register"
 import * as Game from "../src/Game"
+import { isEqual } from "lodash"
 
 interface Test {
   name: string
@@ -48,16 +49,41 @@ test("Should collide: +x, +y", async () => {
   })
   const rect: Game.GameRect = {
     _tag: "GameRect",
-    x: context.canvas.width * 0.5 - 105,
-    y: context.canvas.height * 0.5 - 105,
+    x: context.canvas.width * 0.5 - movementState.player.width * 0.5 - 55,
+    y: context.canvas.height * 0.5 - movementState.player.height * 0.5 - 55,
     width: 100,
     height: 100,
     collidable: true,
     movementFactors: { x: 1, y: 1 },
   }
   const move = Game.movement(movementState, [ rect ])
-  console.log(`${movementState.player.x}x${movementState.player.y} > ${rect.x}x${rect.y}`)
-  throw new Error(`x: ${move.x}, y: ${move.y}`)
+
+  if (!isEqual(move, { x: 5, y: 5 })) {
+    throw new Error(`x: ${move.x}, y: ${move.y}`)
+  }
+})
+test("Should collide: +x, -y", async () => {
+  const movementState = Object.assign(defaultGameState, {
+    time: 1000,
+    activeKeys: {
+      [Game.defaultSettings.keybindings.right]: 0,
+      [Game.defaultSettings.keybindings.up]: 0,
+    },
+  })
+  const rect: Game.GameRect = {
+    _tag: "GameRect",
+    x: context.canvas.width * 0.5 - movementState.player.width * 0.5 - 55,
+    y: context.canvas.height * 0.5 + movementState.player.height * 0.5 + 55,
+    width: 100,
+    height: 100,
+    collidable: true,
+    movementFactors: { x: 1, y: 1 },
+  }
+  const move = Game.movement(movementState, [ rect ])
+
+  if (!isEqual(move, { x: -5, y: -5 })) {
+    throw new Error(`x: ${move.x}, y: ${move.y}`)
+  }
 })
 test("Should collide: -x, -y", async () => {
   const movementState = Object.assign(defaultGameState, {
@@ -69,16 +95,41 @@ test("Should collide: -x, -y", async () => {
   })
   const rect: Game.GameRect = {
     _tag: "GameRect",
-    x: context.canvas.width * 0.5 + 55,
-    y: context.canvas.height * 0.5 + 105,
+    x: context.canvas.width * 0.5 + movementState.player.width * 0.5 + 55,
+    y: context.canvas.height * 0.5 + movementState.player.height * 0.5 + 55,
     width: 100,
     height: 100,
     collidable: true,
     movementFactors: { x: 1, y: 1 },
   }
   const move = Game.movement(movementState, [ rect ])
-  console.log(`${movementState.player.x}x${movementState.player.y} < ${rect.x}x${rect.y}`)
-  throw new Error(`x: ${move.x}, y: ${move.y}`)
+
+  if (!isEqual(move, { x: -5, y: -5 })) {
+    throw new Error(`x: ${move.x}, y: ${move.y}`)
+  }
+})
+test("Should collide: -x, +y", async () => {
+  const movementState = Object.assign(defaultGameState, {
+    time: 1000,
+    activeKeys: {
+      [Game.defaultSettings.keybindings.left]: 0,
+      [Game.defaultSettings.keybindings.down]: 0,
+    },
+  })
+  const rect: Game.GameRect = {
+    _tag: "GameRect",
+    x: context.canvas.width * 0.5 + movementState.player.width * 0.5 + 55,
+    y: context.canvas.height * 0.5 - movementState.player.height * 0.5 - 55,
+    width: 100,
+    height: 100,
+    collidable: true,
+    movementFactors: { x: 1, y: 1 },
+  }
+  const move = Game.movement(movementState, [ rect ])
+
+  if (!isEqual(move, { x: -5, y: -5 })) {
+    throw new Error(`x: ${move.x}, y: ${move.y}`)
+  }
 })
 
 runTests()

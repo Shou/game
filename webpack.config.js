@@ -2,7 +2,7 @@ const path = require("path")
 const config = require("./webpack.common.js")
 
 module.exports = Object.assign(config, {
-  entry: "./src/index.tsx",
+  entry: "./src/index.ts",
   module: {
     rules: [
       ...config.module.rules.slice(1),
