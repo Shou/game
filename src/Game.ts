@@ -3,14 +3,25 @@ import * as React from "react"
 import Prando from "prando"
 import { range } from "lodash"
 
+import { shuffle } from "./Math"
+
 import sun from "../assets/sun.png"
 import grass from "../assets/grass.png"
 import stars from "../assets/stars.png"
 import cloud1 from "../assets/cloud1.png"
 import cloud2 from "../assets/cloud2.png"
+import cloud3 from "../assets/cloud3.png"
+import cloud4 from "../assets/cloud4.png"
+import cloud5 from "../assets/cloud5.png"
+import cloud6 from "../assets/cloud6.png"
+import cloud7 from "../assets/cloud7.png"
+import cloud8 from "../assets/cloud8.png"
+import cloud9 from "../assets/cloud9.png"
 
 // 314 smoke math
-const { PI, sin, cos, abs, min, max, floor, round, pow, random, sign } = Math
+const {
+  PI, sin, cos, abs, min, max, floor, round, ceil, pow, random, sign, atan2
+} = Math
 
 
 const NEWTYPE = Symbol()
@@ -150,7 +161,7 @@ export const createState: <A>(state: Obj<A>) => ScopedState<Obj<A>> = <A>(state:
   }
 }
 
-const debugLines = createState({ lines: new Array(100) as Array<string> })
+const debugLines = createState({ lines: [] as Array<string> })
 
 
 // 60 seconds
@@ -162,7 +173,9 @@ export const grassImage = new Image()
 grassImage.src = grass
 export const starsImage = new Image()
 starsImage.src = stars
-export const cloudImages = [cloud1, cloud2].map(cloud => {
+export const cloudImages = [
+  cloud1, cloud2, cloud3, cloud4, cloud5, cloud6, cloud7, cloud8, cloud9
+].map(cloud => {
   const image = new Image()
   image.src = cloud
   return image
@@ -238,17 +251,22 @@ export const renderGameElement: renderGameElement = (context, gameElement) => {
   }
 }
 
-export const brightness: (t: number) => number = t => min(100, max(0.3, sin(t * PI * 1.8 - 1.4) * 2) * 100)
+export const brightness: (t: number) => number = t =>
+  min(100, max(0.3, sin(t * PI * 1.8 - 1.4) * 2) * 100)
+
+// g n = if n >= 0.2 && n < 0.35 || n > 0.7 && n < 0.85 then max 0 $ sin (n * pi * 2 * 8) * 255 else 0
+// Returns a number between 0 - 1
+export const redness: (t: number) => number = t => 
+  t >= 0.2 && t < 0.35 || t > 0.7 && t < 0.85
+    ? max(0, sin(t * PI * 2 * 8))
+    : 0
 
 export type renderSky = (state: GameState) => GameElements
 export const renderSky: renderSky = ({ context, time }) => {
   const t = (time % DAY_CYCLE) / DAY_CYCLE
 
   // wizard magic
-  // g n = if n >= 0.2 && n < 0.35 || n > 0.7 && n < 0.85 then max 0 $ sin (n * pi * 2 * 8) * 255 else 0
-  const red = t >= 0.2 && t < 0.35 || t > 0.7 && t < 0.85
-    ? max(0, sin(t * PI * 2 * 8)) * 255
-    : 0
+  const red = redness(t) * 255
   // h n = max 0 $ sin (n * pi * 2 / 2 - 0.075) * 255 - 128
   const green = max(0, sin(t * PI * 2 * 0.5 - 0.075) * 255 - 128)
   // f n = min 255 $ max 0.1 (sin (n * pi * 1.8 - 1.4) * 2) * 255
@@ -294,7 +312,7 @@ export const renderSky: renderSky = ({ context, time }) => {
 export type renderSun = (state: GameState) => GameElements
 export const renderSun: renderSun = ({ context, time }) => {
   const t = (time % DAY_CYCLE) / DAY_CYCLE
-  const [width, height] = [150, 150] as [X, Y]
+  const [width, height] = [128, 128] as [X, Y]
   const radius = min(context.canvas.width, context.canvas.height) * 0.67
   const [originX, originY] = [
     context.canvas.width * 0.5,
@@ -318,7 +336,10 @@ export const renderSun: renderSun = ({ context, time }) => {
     y,
     width,
     height,
-    filter: `brightness(${brightness(t) * 2}%)`,
+    filter: [
+      `saturate(${min(100, 110 - brightness(t))}%)`,
+      `hue-rotate(${redness(t) * -90}deg)`,
+    ].join(" "),
     movementFactors: { x: 0, y: 0 } as Coord,
     collidable: false,
   }
@@ -327,47 +348,63 @@ export const renderSun: renderSun = ({ context, time }) => {
 }
 
 export type renderClouds = (state: GameState) => GameElements
-export const renderClouds: renderClouds = ({ settings, context, time }) => {
+export const renderClouds: renderClouds = (state) => {
+  const {
+    settings,
+    context: { canvas },
+    time,
+    screen,
+  } = state
+
   const t: number = (time % DAY_CYCLE) / DAY_CYCLE
-  const [width, height] = [300, 300] as [X, Y]
+  const [width, height] = [256, 256] as [X, Y]
   const deltaX = time / 1000 * 2 as X
   const [x, y] = [
-    W((..._) => context.canvas.width * 0.5 - deltaX, deltaX),
+    W((..._) => canvas.width * 0.5 - deltaX, deltaX),
     100 as Y,
   ]
+  const movementFactors = { x: 0.5, y: 0.5 } as Coord
 
   const walk: Array<Coord> = randomWalk(settings.seed, 30 as X)
   let clouds: Array<GameImage> = []
   if (clouds.length === 0) {
+    const rng = new Prando(settings.seed)
+    const images = shuffle(cloudImages, () => rng.next(0, 1))
+
     clouds = walk.reduce((acc, coord, i) => {
       const {
         x: oldX,
-        y: oldY
-      } = i > 0 ? acc[acc.length - 1] : { x: 0, y: 0 } as Coord
-      const rng = new Prando(settings.seed * i)
+      } = i > 0 ? acc[acc.length - 1] : { x: -500 } as Coord
       const cloud: GameImage = {
         _tag: "GameImage",
-        image: cloudImages[round(rng.next(0, 1))],
-        x: oldX + coord.x * width as X,
-        y: oldY + coord.y * height as Y,
+        image: images[i % images.length],
+        x: oldX + coord.x * width * 0.2 as X,
+        y: height as Y,
         width,
         height,
-        movementFactors: { x: 0.1, y: 0.1 } as Coord,
+        movementFactors,
         collidable: false,
-        filter: `brightness(${brightness(t)}%)`,
+        filter: [
+          `brightness(${brightness(t)}%)`,
+          `hue-rotate(${redness(t) / 255 * 120}deg)`,
+          `opacity(90%)`,
+        ].join(" "),
       }
       return [ ...acc, cloud ]
     }, [] as Array<GameImage>)
   }
 
   debugLines.setState(({ lines }) => {
-    lines[2] = clouds.reduce((acc, cloud) => [
-      ...acc,
-      `{ ${cloud.x.toFixed(1)}, ${cloud.y.toFixed(1)} }`,
-    ], [] as Array<string>).join(", ")
+    lines[0] = clouds.map(
+      cloud => `{ ${(cloud.x + x).toFixed(1)}, ${(cloud.y + y).toFixed(1)} }`
+    ).join(", ")
     return { lines }
   })
 
+  const testX = screen.x
+
+  // TODO multiply these by something like (screen.x / canvas.width) or w/e
+  // the end goal is to make the clouds repeat
   return clouds.map(cloud => ({
     ...cloud,
     x: cloud.x + x as X,
@@ -474,7 +511,7 @@ let fpsState = [Date.now()]
 export type renderDebug = (gameState: GameState) => GameElements
 export const renderDebug: renderDebug = (state) => {
   const {
-    context,
+    context: { canvas },
     time,
     player,
     screen,
@@ -545,8 +582,8 @@ export const renderDebug: renderDebug = (state) => {
     style: "rgba(255,255,255, 0.1)",
     x: 150 as X,
     y: 150 as Y,
-    width: context.canvas.width - 300 as X,
-    height: context.canvas.height - 300 as Y,
+    width: canvas.width - 300 as X,
+    height: canvas.height - 300 as Y,
     collidable: false,
     movementFactors: { x: 0, y: 0 } as Coord,
     position: "top-left",
@@ -562,7 +599,7 @@ export const renderDebug: renderDebug = (state) => {
       style: "white",
       x: 150 as X,
       y: 150 + (i + 1) * 30 as Y,
-      width: 300 as X,
+      width: canvas.width as X,
       height: 30 as Y,
       movementFactors: { x: 0, y: 0 } as Coord,
       collidable: false,
@@ -678,11 +715,15 @@ export type movement = (state: GameState) => Coord
 export const movement: movement = (state) => {
   const {
     time,
+    lastFrame,
     settings: {
       keybindings: keys,
     },
     player: { velocity, airborne },
   } = state
+
+  // Time delta
+  const dt = (time - lastFrame) / 1000
 
   const halfPiFraction: (k: string) => number = k =>
     min(1000, time - state.activeKeys[k]) / 1000 * PI * 0.5
@@ -690,10 +731,10 @@ export const movement: movement = (state) => {
   const sprintFactor = (keys.sprint in state.activeKeys ? 1.5 : 1) as X
   const moveLeft = keys.left in state.activeKeys
     ? max(1, velocity.x) * sin(halfPiFraction(keys.left)) * -10 as X
-    : 0 as X
+    : min(0, velocity.x + 1) as X
   const moveRight = keys.right in state.activeKeys
     ? sin(halfPiFraction(keys.right)) * 10 as X
-    : 0 as X
+    : max(0, velocity.x - 1) as X
 
   const jump = keys.jump in state.activeKeys && !airborne
     ? sin(min(1000, time - state.activeKeys[keys.jump]) / 1000 * PI * 0.5 + PI * 0.5) * -100 as Y
@@ -701,12 +742,13 @@ export const movement: movement = (state) => {
   // 1. Don't add gravity unless we're airborne
   // 2. If we're airborne but not falling, start falling
   // 3. Add 3% compounding gravity
+  // 4. Limit it to 500 * dt
   const gravity = (n: Y) => airborne
-    ? min(50, n === 0 ? 1 : (n < 0 ? n * 0.5 : n * 1.03)) as Y
+    ? min(500 * dt, round(n) === 0 ? 1 : (n < 0 ? n * 0.5 : n * 1.03)) as Y
     : n
 
   debugLines.setState(({ lines }) => {
-    lines[0] = `jump: ${jump}, gravity: ${gravity(jump || velocity.y).toFixed(1)}, airborne: ${airborne}`
+    lines[1] = `jump: ${jump}, gravity: ${gravity(jump || velocity.y).toFixed(1)}, airborne: ${airborne}`
     return { lines }
   })
 
@@ -738,7 +780,7 @@ export const collisionResolution: collisionResolution = (move, state, gameElemen
         W((..._) => elem.x - player.x, elem.x, player.x),
         W((..._) => elem.y - player.y, elem.y, player.y),
       ]
-      // Is the element relative to player, and movement, in the same direction?
+      // Is the player movement in direction of the element?
       const moveX = W((..._) => move.x / 10, move.x)
       const moveY = W((..._) => move.y / 10, move.y)
       const collidingCourse = dot(
@@ -746,53 +788,86 @@ export const collisionResolution: collisionResolution = (move, state, gameElemen
         [diffX, diffY],
       )
 
+      console.log(collidingCourse, "collidingCourse")
       if (collidingCourse > 0.5) {
-        const testX = move.x > 0
-          ? (player.x + player.width * 0.5 + move.x) > (elem.x - elem.width * 0.5)
-          : (player.x - player.width * 0.5 + move.x) < (elem.x + elem.width * 0.5)
-        const testY = move.y > 0
-          ? (player.y + player.height * 0.5 + move.y) > (elem.y - elem.height * 0.5)
-          : (player.y - player.height * 0.5 + move.y) < (elem.y + elem.height * 0.5)
+        const rightPlayerX = player.x + player.width * 0.5 + move.x as X
+        const leftPlayerX = player.x - player.width * 0.5 + move.x as X
+        const downPlayerY = player.y + player.height * 0.5 + move.y as Y
+        const upPlayerY = player.y - player.height * 0.5 + move.y as Y
 
-        //if (testX && testY) {
-        if (
-          (player.x - player.width * 0.5 + move.x) < (elem.x + elem.width * 0.5)
-          && (player.x + player.width * 0.5 + move.x) > (elem.x - elem.width * 0.5)
-          && (player.y - player.height * 0.5 + move.y) < (elem.y + elem.height * 0.5)
-          && (player.y + player.height * 0.5 + move.y) > (elem.y - elem.height * 0.5)
-        ) {
-          const newMove = {
+        const rightElemX = elem.x + elem.width * 0.5 as X
+        const leftElemX = elem.x - elem.width * 0.5 as X
+        const downElemY = elem.y + elem.height * 0.5 as Y
+        const upElemY = elem.y - elem.height * 0.5 as Y
+
+        const isInsideElemX = leftPlayerX < rightElemX && rightPlayerX > leftElemX
+        const isInsideElemY = upPlayerY < downElemY && downPlayerY > upElemY
+
+        console.log([move.x, move.y], "move")
+        console.log([isInsideElemX, isInsideElemY], "isInsideElem")
+        if (isInsideElemX && isInsideElemY) {
+          // XXX can we adjust _one_ based on closest 90deg angle
+          // and only both when it's a 45deg angle
+          // WIP
+          console.log(
+            `${leftPlayerX} x ${upPlayerY} x ${rightPlayerX} x ${downPlayerY}`
+          )
+          console.log(
+            `${leftElemX} x ${upElemY} x ${rightElemX} x ${downElemY}`
+          )
+
+          // 1. Get the delta we need to correct
+          // 2. Multiply it by the angle we're moving in
+          //    - If it's 45 degrees both X and Y are affected
+          //    - The plane we're moving the fastest in gets multiplied by the
+          //      min(1) value
+          //    - The plane we're moving the slowest in gets multiplied by the
+          //      fraction of what we're moving in the other plane
+          //    - We ensure the fraction is absolute so we don't affect the
+          //      sign of the delta and move in the opposite direction
+          const corrected = {
             x: W(
-              (..._) => 0, //diffX + (player.width * 0.5 + elem.width * 0.5) * sign(diffX) * -1,
-              diffX, player.width, elem.width,
+              (..._) => move.x + (
+                move.x > 0
+                  ? (leftElemX - rightPlayerX) * min(1, abs(move.x / move.y))
+                  : (rightElemX - leftPlayerX) * min(1, abs(move.x / move.y))
+                ),
+              rightElemX, leftElemX, rightPlayerX, leftPlayerX,
             ),
             y: W(
-              (..._) => 0, //diffY + (player.height * 0.5 + elem.height * 0.5) * sign(diffY) * -1,
-              diffY, player.height, elem.height,
+              (..._) => move.y + (
+                move.y > 0
+                  ? (upElemY - downPlayerY) * min(1, abs(move.y / move.x))
+                  : (downElemY - upPlayerY) * min(1, abs(move.y / move.x))
+                ),
+              downElemY, upElemY, downPlayerY, upPlayerY
             ),
           }
+          console.log(corrected, "corrected")
 
           return {
             x: W(
-              (..._) => player.x + newMove.x,
-              player.x, newMove.x,
+              (..._) => player.x + corrected.x,
+              player.x, corrected.x,
             ),
             y: W(
-              (..._) => player.y + newMove.y,
-              player.y, newMove.y,
+              (..._) => player.y + corrected.y,
+              player.y, corrected.y,
             ),
-            velocity: newMove,
+            velocity: corrected,
             airborne: move.y < 0,
           }
         }
       }
     }
 
+    console.log(JSON.stringify([ move.x, move.y]), "no coll")
     return {
       ...player,
       velocity: move,
       x: player.x + move.x as X,
       y: player.y + move.y as Y,
+      airborne: true,
     }
   }
 }
@@ -838,7 +913,6 @@ export const initGame = (context: CanvasRenderingContext2D) => {
     const movedPlayer: Partial<Player> =
       collisionResolution(keyMove, state, gameElements)
 
-    // todo clamp within some large coordinates so if we fall of the map
     const player = {
       ...state.player,
       ...movedPlayer,
@@ -865,11 +939,11 @@ export const initGame = (context: CanvasRenderingContext2D) => {
       player,
       screen: {
         x: W(
-          (..._) => player.x - context.canvas.width * 0.5, // state.screen.x + player.velocity.x,
+          (..._) => player.x - context.canvas.width * 0.5,
           state.screen.x, player.velocity.x,
         ),
         y: W(
-          (..._) => player.y - context.canvas.height * 0.5, // state.screen.y + player.velocity.y,
+          (..._) => player.y - context.canvas.height * 0.5,
           state.screen.y, player.velocity.y,
         ),
       },
@@ -896,8 +970,8 @@ export const Game: Game = () => {
 
   return React.createElement("canvas", {
     ref: canvasRef,
-    width: 1920,
-    height: 1080,
+    width: 1600,
+    height: 900,
     style: {
       width: "100vw",
       height: "100vh",
