@@ -1,7 +1,7 @@
 
 import * as React from "react"
 import Prando from "prando"
-import { range } from "lodash"
+import { range, minBy } from "ramda"
 
 import { shuffle } from "./Math"
 
@@ -21,13 +21,19 @@ import mountain1 from "../assets/mountain1.png"
 
 // 314 smoke math
 const {
-  PI, sin, cos, abs, min, max, floor, round, ceil, pow, random, sign, atan2
+  PI, sin, cos, abs, min, max, pow, random, sign, atan2
 } = Math
 
 
 const NEWTYPE = Symbol()
 export type X = number & { readonly [NEWTYPE]: unique symbol }
 export type Y = number & { readonly [NEWTYPE]: unique symbol }
+
+export type Integer = number & { readonly [NEWTYPE]: unique symbol }
+
+const floor = <A>(n: number & A) => Math.floor(n) as Integer
+const ceil = <A>(n: number & A) => Math.ceil(n) as Integer
+const round = <A>(n: number & A) => Math.round(n) as Integer
 
 type W = <A>(f: (...as: Array<A>) => any, ...as: Array<A>) => A
 const W: W = <A>(f: (...as: Array<A>) => any, ...as: Array<A>) => f(...as) as A
@@ -53,7 +59,7 @@ export interface Filter {
 export type CoreElement = {
   collidable: boolean,
   movementFactors: Coord,
-  position?: "center" | "top-left"
+  position?: "center" | "top-left",
 } & Coord & Dimensions & Filter
 
 export type GameImage = {
@@ -107,6 +113,7 @@ export interface Keybindings {
 
 export interface Settings {
   keybindings: Keybindings
+  fps: number
   seed: number
 }
 
@@ -119,7 +126,8 @@ export const defaultSettings = {
     jump: " ",
     sprint: "Shift",
   },
-  seed: floor(random() * 10)
+  fps: 30,
+  seed: floor(random() * 10),
 }
 
 export type UserSettings = {
@@ -135,7 +143,34 @@ export interface ActiveKeys {
 export type Player = {
   velocity: Coord,
   airborne: boolean,
+  effects: Effects,
 } & Coord & Dimensions
+
+// 1 Effects should run until whenever they want to stop:
+//  - What should signal stopping them?
+//    - Return NULL because its idiomatic js lol
+// 2. Effects should act after movement but before collision resolution(?)
+// 3. Maybe we should only act on one GameState field? Let's see how we use it
+//
+// This means we can implement things like jumping, attacks, that affect the
+// player over several frames.
+export type Effect = (state: GameState) => Partial<GameState> | null
+export type Effects = Array<Effect>
+
+type runEffects = <A>(state: GameState, effects: Effects) => GameState
+const runEffects: runEffects = (state, effects) => {
+  let accState = { ...state }
+
+  for (const effect of effects) {
+    const result: Partial<GameState> | null = effect(accState)
+
+    if (result !== null) {
+      accState = Object.assign(accState, result)
+    }
+  }
+
+  return accState
+}
 
 export interface GameState {
   context: CanvasRenderingContext2D
@@ -145,7 +180,6 @@ export interface GameState {
   screen: Coord
   settings: Settings
   activeKeys: ActiveKeys
-  move: Coord
 }
 
 export interface ScopedState<A> {
@@ -174,7 +208,8 @@ type getChunkForCoords = (coord: Coord, gameChunks: GameChunks) => GameElements
 export const getChunkForCoords: getChunkForCoords = (coord, gameChunks) =>
   gameChunks[round(coord.x / CHUNK_SIZE)]?.[round(coord.y / CHUNK_SIZE)] || []
 
-const debugLines = createState({ lines: [] as Array<string> })
+type DebugState = { lines: Array<string | null> }
+const debugLines = createState<DebugState>({ lines: range(0, 10).map(_ => null) })
 
 
 // 60 seconds
@@ -188,11 +223,10 @@ export const starsImage = new Image()
 starsImage.src = stars
 export const cloudImages = [
   cloud1, cloud2, cloud3, cloud4, cloud5, cloud6, cloud7, cloud8, cloud9
-].map(cloud => {
-  const image = new Image()
-  image.src = cloud
-  return image
-})
+].map(src => Object.assign(new Image(), { src }))
+export const mountainImages = [
+  mountain1
+].map(src => Object.assign(new Image(), { src }))
 
 export type dot = (left: [X, Y], right: [X, Y]) => number
 export const dot: dot = (left, right) =>
@@ -386,21 +420,25 @@ export const renderClouds: renderClouds = (state) => {
   ]
   const movementFactors = { x: 0.5, y: 0.5 } as Coord
 
-  const walk: Array<Coord> = randomWalk(settings.seed, 30 as X)
-  let clouds: Array<GameImage> = []
+  const clouds: Array<GameImage> = []
   if (clouds.length === 0) {
     const rng = new Prando(settings.seed)
     const images = shuffle(cloudImages, () => rng.next(0, 1))
+    const walk: Array<Coord> = randomWalk(settings.seed, 3 as X)
 
-    clouds = walk.reduce((acc, coord, i) => {
+    for (const coord of walk) {
       const {
         x: oldX,
-      } = i > 0 ? acc[acc.length - 1] : { x: -500 } as Coord
+        y: oldY,
+      } = clouds.length > 0
+        ? walk[walk.length - 1]
+        : { x: -500, y: 100 } as Coord
+
       const cloud: GameImage = {
         _tag: "GameImage",
-        image: images[i % images.length],
-        x: oldX + coord.x * width * 0.2 as X,
-        y: height as Y,
+        image: images[clouds.length % images.length],
+        x: oldX + coord.x * width as X,
+        y: oldY + coord.y * height as Y,
         width,
         height,
         movementFactors,
@@ -411,8 +449,9 @@ export const renderClouds: renderClouds = (state) => {
           `opacity(90%)`,
         ].join(" "),
       }
-      return [ ...acc, cloud ]
-    }, [] as Array<GameImage>)
+
+      clouds.push(cloud)
+    }
   }
 
   debugLines.setState(({ lines }) => {
@@ -433,6 +472,28 @@ export const renderClouds: renderClouds = (state) => {
   }))
 }
 
+type renderMountains = (state: GameState) => GameElements
+const renderMountains: renderMountains = (state) => {
+  const {
+    time: { now },
+  } = state
+
+  const t: number = (now % DAY_CYCLE) / DAY_CYCLE
+
+  const mountain: GameImage = {
+    _tag: "GameImage",
+    image: mountainImages[0],
+    x: 0 as X,
+    y: 500 as Y,
+    width: 512 as X,
+    height: 512 as Y,
+    movementFactors: { x: 0.1, y: 0.1 } as Coord,
+    collidable: false,
+    filter: `brightness(${brightness(t)}%)`,
+  }
+  return [ mountain ]
+}
+
 // NOTE: will return _at least_ one coord object
 export type randomWalk = (
   seed: number,
@@ -440,8 +501,8 @@ export type randomWalk = (
 ) => Array<Coord>
 export const randomWalk: randomWalk = (seed, xMax) => {
   const rng = new Prando(seed * xMax)
-  const x = round(rng.next(1, min(xMax, 10))) as X
-  const y = round(rng.next(-3, 3)) as Y
+  const x = round(rng.next(1, min(xMax, 10))) as number as X
+  const y = round(rng.next(-3, 3)) as number as Y
   const coord: Coord = { x, y }
 
   return x < xMax
@@ -479,39 +540,72 @@ const renderCaves: renderCaves = (state) => {
 
   if (caves.length === 0) {
     const rng = new Prando(settings.seed)
-    const walk = randomWalk2D(200, 3, 10 as X, () => rng.next(0, 1))
-    console.log(walk, "caves walk")
-    let old = { x: 0, y: 0 } as Coord
-    caves = walk.map(coord => {
-      const [x, y] = [ round(coord.x - old.x) as X, round(coord.y - old.y) as Y ]
-      const blocks: Array<GameRect> = []
-      old = coord
+    const walk = randomWalk2D(400, 3, 10 as X, () => rng.next(0, 1))
+    const sortedX = [ ...walk].sort((a, b) => a.x - b.x)
+    const sortedY = [ ...walk].sort((a, b) => a.y - b.y)
 
-      console.log(`x: ${x}, y: ${y}`, "caves diffs")
-      for (let i = 0; i < abs(x); i++) {
-        for (let j = 0; j < abs(y); j++) {
-          blocks.push({
+    const [minX, maxX]: [Integer, Integer] = [
+      round(sortedX[0].x),
+      round(sortedX[sortedX.length - 1].x),
+    ]
+    const [minY, maxY]: [Integer, Integer] = [
+      round(sortedY[0].y),
+      round(sortedY[sortedY.length - 1].y),
+    ]
+
+    const rangeX = new Set(range(minX, maxX)) as Set<Integer>
+    const rangeY = new Set(range(minY, maxY)) as Set<Integer>
+
+    for (const coord of walk) {
+      const ix = round(coord.x)
+      const iy = round(coord.y)
+
+      rangeX.delete(ix)
+      rangeY.delete(iy)
+    }
+    console.log(rangeX, "rangeX")
+    console.log(rangeY, "rangeY")
+
+    for (let ix = minX; ix < maxX; ix++) {
+      for (let iy = minY; iy < maxY; iy++) {
+        if (rangeX.has(ix) && rangeY.has(iy)) {
+          caves.push({
             _tag: "GameRect",
-            x: round(coord.x + i * sign(y) * -1) * 100 as X,
-            y: round(coord.y + j * sign(x) * -1) * 100 as Y,
+            x: minX + ix * 100 as X,
+            y: minY + iy * 100 as Y,
             width: 100 as X,
             height: 100 as Y,
             style: "brown",
-            filter: `brightness(${brightness(t)}%)`,
             movementFactors: { x: 1, y: 1 } as Coord,
             collidable: true,
           })
         }
       }
-      return blocks
-    }).flat()
-    console.log(caves, "caves")
+    }
+
+    let old = { x: 0, y: 0 } as Coord
+    for (const coord of [] as Array<Coord>) { // walk) {
+      const [x, y] = [ round(coord.x - old.x) as X, round(coord.y - old.y) as Y ]
+      old = coord
+
+      for (let i = 0; i < abs(x); i++) {
+        for (let j = 0; j < abs(y); j++) {
+          caves.push({
+            _tag: "GameRect",
+            x: round(coord.x + i * sign(y) * -1) * 100 as X,
+            y: round(coord.y + j * sign(x) * -1) * 100 + abs(minY) as Y,
+            width: 100 as X,
+            height: 100 as Y,
+            style: "brown",
+            movementFactors: { x: 1, y: 1 } as Coord,
+            collidable: true,
+          })
+        }
+      }
+    }
   }
 
-  return caves.map(block => ({
-    ...block,
-    filter: `brightness(${brightness(t)}%)`,
-  }))
+  return caves
 }
 
 let grasses: Array<GameRect> = []
@@ -537,8 +631,8 @@ export const renderGrass: renderGrass = (state) => {
         y: oldY
       } = i > 0 ? acc[acc.length - 1] : { x: 0, y: 0 } as Coord
       console.log(acc[acc.length - 1], `acc[${acc.length - 1}]`)
-      const xRange = range(x) as Array<X>
-      const yRange = range(y) as Array<Y>
+      const xRange = range(x >= 0 ? 0 : x, x >= 0 ? x : 0) as Array<X>
+      const yRange = range(y >= 0 ? 0 : y, y >= 0 ? y : 0) as Array<Y>
       const floor: Array<GameRect> = xRange.map(i => ({
         _tag: "GameRect",
         x: W((..._) => oldX + i * width, oldX, i, width),
@@ -568,6 +662,7 @@ export const renderGrass: renderGrass = (state) => {
     }))
   }
 
+  // TODO do brightness/lighting somewhere more general
   return grasses.map(grass => ({
     ...grass,
     filter: `brightness(${brightness(t)}%)`,
@@ -685,21 +780,27 @@ export const renderDebug: renderDebug = (state) => {
 
   fpsState = fpsState.concat([dateNow]).slice(-10)
 
-  const lines: Array<GameText> = debugLines.getState().lines.map((text, i) => {
-    return {
-      _tag: "GameText",
-      font: "30px Open Sans Mono",
-      text,
-      style: "white",
-      x: 150 as X,
-      y: 150 + (i + 1) * 30 as Y,
-      width: canvas.width as X,
-      height: 30 as Y,
-      movementFactors: { x: 0, y: 0 } as Coord,
-      collidable: false,
-      position: "top-left",
+  const lines: Array<GameText> = debugLines.getState().lines.reduce((acc, text, i) => {
+    if (text !== null) {
+      return acc.concat([
+        {
+          _tag: "GameText",
+          font: "30px Open Sans Mono",
+          text,
+          style: "white",
+          x: 150 as X,
+          y: 150 + (i + 1) * 30 as Y,
+          width: canvas.width as X,
+          height: 30 as Y,
+          movementFactors: { x: 0, y: 0 } as Coord,
+          collidable: false,
+          position: "top-left",
+        }
+      ])
     }
-  })
+
+    return acc
+  }, [] as Array<GameText>)
 
   return [
     timeText,
@@ -715,6 +816,7 @@ export const gameLayers = [
   renderSky,
   renderSun,
   renderClouds,
+  renderMountains,
   renderGrass,
   renderCaves,
   renderDebug,
@@ -806,7 +908,7 @@ export const attachKeyEvents: attachKeyEvents = (scopedState) => {
   })
 }
 
-export type movement = (state: GameState) => Coord
+export type movement = (state: GameState) => Player
 export const movement: movement = (state) => {
   const {
     time: { now, previous },
@@ -830,9 +932,35 @@ export const movement: movement = (state) => {
     ? sin(halfPiFraction(keys.right)) * 20 as X
     : max(0, velocity.x - 1) as X
 
-  const jump = keys.jump in state.activeKeys && !airborne
-    ? sin(min(1000, now - state.activeKeys[keys.jump]) / 1000 * PI * 0.5) * -300 as Y
-    : 0 as Y
+  const effects: Effects = []
+  if (keys.jump in state.activeKeys && !airborne) {
+    const jumpEffect: Effect = (effectState) => {
+      const {
+        player: { velocity },
+        activeKeys,
+        settings: { keybindings: { jump } }
+      } = effectState
+
+      if (jump in activeKeys && now - activeKeys[jump] < 1000) {
+        const y = (1 - (now - activeKeys[jump]) / 1000) * -100
+        debugLines.setState(({ lines }) => {
+          lines[4] = `jump: ${y.toFixed(1)}`
+          return { lines }
+        })
+        return {
+          player: Object.assign(effectState.player, {
+            velocity: {
+              x: velocity.x,
+              y
+            },
+          }),
+        }
+      }
+
+      return null
+    }
+    effects.push(jumpEffect)
+  }
 
   // 1. Add 100% compounding gravity
   // 2. Limit to maximum 500 * dt, i.e. 500px/s
@@ -841,34 +969,35 @@ export const movement: movement = (state) => {
 
   //console.log(gravity(jump || velocity.y), "gravity")
   debugLines.setState(({ lines }) => {
-    lines[1] = `jump: ${jump}, gravity: ${gravity(jump || velocity.y).toFixed(1)}, airborne: ${airborne}`
+    lines[1] = `gravity: ${gravity(velocity.y).toFixed(1)}, airborne: ${airborne}`
     return { lines }
   })
 
-  return {
-    x: W((..._) => (moveLeft + moveRight), moveLeft, moveRight),
-    y: W((..._) => gravity(jump || velocity.y), jump),
-  }
+  return Object.assign(state.player, {
+    velocity: {
+      x: W((..._) => (moveLeft + moveRight), moveLeft, moveRight),
+      y: gravity(velocity.y),
+    },
+    effects,
+  })
 }
 
 type collisionResolution = (
-  move: Coord,
   state: GameState,
   gameElements: Array<GameElement>
 ) => Partial<Player>
-export const collisionResolution: collisionResolution = (move, state, gameElements) => {
+export const collisionResolution: collisionResolution = (state, gameElements) => {
   const {
     context: { canvas },
     player: initPlayer,
   } = state
 
-  if (move.x === 0 && move.y === 0) {
+  if (initPlayer.velocity.x === 0 && initPlayer.velocity.y === 0) {
     return {}
 
   } else {
     const movingPlayer: Player = {
       ...initPlayer,
-      velocity: move,
       // Airborne until proven false by a downward collision
       airborne: true,
     }
@@ -920,7 +1049,7 @@ export const collisionResolution: collisionResolution = (move, state, gameElemen
 
           // 1. Check which has the smallest rounded, absolute change
           // 2. If smallest, use said smallest change
-          // 3. Otherwise, default to zero
+          // 3. Otherwise, default to zero correction
           //
           // This ensures we don't move unnecessarily far when correcting
           const correctedVelocity = {
@@ -937,7 +1066,7 @@ export const collisionResolution: collisionResolution = (move, state, gameElemen
           const airborne = player.airborne && downPlayerY < upElemY
 
           debugLines.setState(({ lines }) => {
-            lines[2] = `elem: ${elem.x}x${elem.y}, player: ${player.x}x${player.y}`
+            lines[2] = `elem: ${elem.x}x${elem.y}, player: ${player.x.toFixed(1)}x${player.y.toFixed(1)}`
             return { lines }
           })
 
@@ -967,6 +1096,9 @@ export const collisionResolution: collisionResolution = (move, state, gameElemen
 }
 
 export const initGame = (context: CanvasRenderingContext2D) => {
+  // We don't want image smoothing
+  context.imageSmoothingEnabled = false
+
   const userSettings: UserSettings = (() => {
     try {
       return JSON.parse(localStorage.getItem("game/user-settings") || "{}")
@@ -986,11 +1118,11 @@ export const initGame = (context: CanvasRenderingContext2D) => {
       height: 100 as Y,
       velocity: { x: 0, y: 0 } as Coord,
       airborne: true,
+      effects: [],
     },
     screen: { x: 0 as X, y: 0 as Y },
     settings: defaultSettings,
     activeKeys: {},
-    move: { x: 0 as X, y: 0 as Y },
   })
 
   attachKeyEvents(scopedState)
@@ -1001,22 +1133,24 @@ export const initGame = (context: CanvasRenderingContext2D) => {
     const delta = now - state.lastFrame
     state.time = { previous: state.time.now, now }
 
+    let movedPlayer: Player = movement(state)
+    state.player = movedPlayer
+    state.player = runEffects(state, movedPlayer.effects).player
+
     const gameElements = getGameElements(state)
     const collidableElements = gameElements.filter(elem => elem.collidable)
-    const keyMove: Coord = movement(state)
-    const movedPlayer: Partial<Player> =
-      collisionResolution(keyMove, state, collidableElements)
+    const resolvedPlayer: Partial<Player> =
+      collisionResolution(state, collidableElements)
 
     const player = {
       ...state.player,
-      ...movedPlayer,
+      ...resolvedPlayer,
       // TODO increase these later i guess lol
-      x: (movedPlayer.x || state.player.x) % 10000 as X,
-      y: (movedPlayer.y || state.player.y) % 10000 as Y,
+      x: (resolvedPlayer.x || state.player.x) % 10000 as X,
+      y: (resolvedPlayer.y || state.player.y) % 10000 as Y,
     }
 
-    // TODO FPS in settings
-    if (delta > (1000 / 60)) {
+    if (delta > (1000 / state.settings.fps)) {
       const movedState = {
         ...state,
         player,

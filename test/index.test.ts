@@ -52,11 +52,11 @@ const defaultGameState: GameState = {
     velocity: { x: 0, y: 0 } as Coord,
     // Gravity should be tested independently
     airborne: false,
+    effects: [],
   },
   screen: { x: 0, y: 0 } as Coord,
   settings: Game.defaultSettings,
   activeKeys: {},
-  move: { x: 0, y: 0 } as Coord,
 }
 
 
