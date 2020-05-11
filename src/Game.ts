@@ -25,20 +25,25 @@ const {
 } = Math
 
 
-const NEWTYPE = Symbol()
-// Typescript bad so don't use this to define types, only to match
-type Newtype<A, B> = A & { readonly [NEWTYPE]: B }
-type NewtypeU<A, B> = A & { readonly [NEWTYPE]: B }
+namespace Unique {
+  export declare const Newtype: unique symbol
+  export type X = { readonly 0: unique symbol }[0]
+  export type Y = { readonly 0: unique symbol }[0]
+  export type Integer = { readonly 0: unique symbol }[0]
+  export type Milliseconds = { readonly 0: unique symbol }[0]
+  export type Seconds = { readonly 0: unique symbol }[0]
+  export type Natural = { readonly 0: unique symbol }[0]
+}
 
-type Test = Newtype<number, ({ readonly U: unique symbol })["U"]>
+type Newtype<A, B> = A & { readonly [Unique.Newtype]: B }
 
-export type X = number & { readonly [NEWTYPE]: unique symbol }
-export type Y = number & { readonly [NEWTYPE]: unique symbol }
+export type X = Newtype<number, Unique.X>
+export type Y = Newtype<number, Unique.Y>
 
-export type Integer = number & { readonly [NEWTYPE]: unique symbol }
+export type Integer = Newtype<number, Unique.Integer>
 
-export type Milliseconds = number & { readonly [NEWTYPE]: unique symbol }
-export type Seconds = number & { readonly [NEWTYPE]: unique symbol }
+export type Milliseconds = Newtype<number, Unique.Milliseconds>
+export type Seconds = Newtype<number, Unique.Seconds>
 
 const toSeconds: (ms: Milliseconds) => Seconds
   = (ms) => ms / 1000 as Seconds
@@ -53,7 +58,7 @@ const floor = <A>(n: number & A) => Math.floor(n) as Integer
 const ceil = <A>(n: number & A) => Math.ceil(n) as Integer
 const round = <A>(n: number & A) => Math.round(n) as Integer
 
-export type Natural = Integer & { readonly [NEWTYPE]: unique symbol }
+export type Natural = Newtype<Integer, Unique.Natural>
 
 const natural: <A>(n: number & A) => Natural
   = (n) => max(0, n) as Natural
@@ -72,6 +77,9 @@ const wrap = <A, B>(a: A) =>
 
 const unwrap = <A, B>(newtype: Newtype<A, B>) =>
   newtype as A
+
+const over: <A, B>(newtype: Newtype<A, B>, f: (a: A) => A) => Newtype<A, B>
+  = (newtype, f) => wrap(f(unwrap(newtype)))
 
 export interface Coord {
   x: X
@@ -1096,7 +1104,9 @@ export const movement: movement = (state) => {
           })
         }
 
-        return Stop({})
+        return Stop({
+          zoom: round(zoom * 2) * 0.5,
+        })
       }
       effects.push(zoomEffect)
     }
@@ -1351,8 +1361,8 @@ export const initGame = (context: CanvasRenderingContext2D) => {
       lastFrame: state.lastFrame,
       player,
       screen: {
-        x: player.x - state.dimensions.width * 0.5 as X,
-        y: player.y - state.dimensions.height * 0.5 as Y,
+        x: wrap(diff(player.x, state.dimensions.width) * 0.5),
+        y: wrap(diff(player.y, state.dimensions.height) * 0.5),
       },
     }))
 
