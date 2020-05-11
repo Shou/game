@@ -28,11 +28,26 @@ const {
 const NEWTYPE = Symbol()
 // Typescript bad so don't use this to define types, only to match
 type Newtype<A, B> = A & { readonly [NEWTYPE]: B }
+type NewtypeU<A, B> = A & { readonly [NEWTYPE]: B }
+
+type Test = Newtype<number, ({ readonly U: unique symbol })["U"]>
 
 export type X = number & { readonly [NEWTYPE]: unique symbol }
 export type Y = number & { readonly [NEWTYPE]: unique symbol }
 
 export type Integer = number & { readonly [NEWTYPE]: unique symbol }
+
+export type Milliseconds = number & { readonly [NEWTYPE]: unique symbol }
+export type Seconds = number & { readonly [NEWTYPE]: unique symbol }
+
+const toSeconds: (ms: Milliseconds) => Seconds
+  = (ms) => ms / 1000 as Seconds
+
+const fromSeconds: (ss: Seconds) => Milliseconds
+  = (ss) => ss * 1000 as Milliseconds
+
+const diff: <A>(a: Newtype<number, A>, b: Newtype<number, A>) => Newtype<number, A>
+  = (a, b) => wrap(a - b)
 
 const floor = <A>(n: number & A) => Math.floor(n) as Integer
 const ceil = <A>(n: number & A) => Math.ceil(n) as Integer
@@ -49,6 +64,14 @@ const W: W = <A>(f: (...as: Array<A>) => any, ...as: Array<A>) => f(...as) as A
 const coerce = <A, B, C>(newtype: Newtype<A, B>) =>
   newtype as unknown as Newtype<A, C>
 
+// Inspired by Conon McBride's "Control.Newtype"
+// https://hackage.haskell.org/package/newtype-0.2.2.0/docs/Control-Newtype.html
+// https://pursuit.purescript.org/packages/purescript-newtype/3.0.0/docs/Data.Newtype
+const wrap = <A, B>(a: A) =>
+  a as Newtype<A, B>
+
+const unwrap = <A, B>(newtype: Newtype<A, B>) =>
+  newtype as A
 
 export interface Coord {
   x: X
@@ -152,7 +175,7 @@ export type UserSettings = {
 }
 
 export interface ActiveKeys {
-  [key: string]: number
+  [key: string]: Milliseconds
 }
 
 export type Player = {
@@ -211,8 +234,8 @@ const runEffects: runEffects = (state) => {
 export interface GameState {
   readonly context: CanvasRenderingContext2D
   dimensions: Dimensions
-  time: { now: number, previous: number }
-  lastFrame: number
+  time: { now: Milliseconds, previous: Milliseconds }
+  lastFrame: Milliseconds
   player: Player
   screen: Coord
   settings: Settings
@@ -322,14 +345,8 @@ export const renderGameElement: renderGameElement = (context, gameElement) => {
   }
   if ("position" in gameElement && gameElement.position === "top-left") {
   } else {
-    gameElement.x = W(
-      (..._) => gameElement.x - gameElement.width * 0.5,
-      gameElement.x, gameElement.width
-    )
-    gameElement.y = W(
-      (..._) => gameElement.y - gameElement.height * 0.5,
-      gameElement.y, gameElement.height
-    )
+    gameElement.x = wrap(diff(gameElement.x, gameElement.width) * 0.5)
+    gameElement.y = wrap(diff(gameElement.y, gameElement.height) * 0.5)
   }
 
   switch (gameElement._tag) {
@@ -586,7 +603,7 @@ export const randomWalk: randomWalk = (seed, xMax) => {
   const coord: Coord = { x, y }
 
   return x < xMax
-    ? [ coord ].concat(randomWalk(seed, W((..._) => xMax - x, xMax, x)))
+    ? [ coord ].concat(randomWalk(seed, diff(xMax, x)))
     : [ coord ]
 }
 
@@ -759,7 +776,8 @@ export const renderPlayer: renderPlayer = ({ player }) => {
   ]
 }
 
-let fpsState = [Date.now()]
+let fpsState: Array<Milliseconds>
+  = [Date.now() as Milliseconds]
 export type renderDebug = (gameState: GameState) => GameElements
 export const renderDebug: renderDebug = (state) => {
   const {
@@ -769,7 +787,10 @@ export const renderDebug: renderDebug = (state) => {
     screen,
   } = state
   const t = (now % DAY_CYCLE) / DAY_CYCLE
-  const averageTime = fpsState.slice(1).reduce((acc, val, index) => acc + val - fpsState[index - 1], 0) / (fpsState.length - 1)
+  const averageTime = wrap(fpsState.slice(1).reduce(
+    (acc, val, index) => wrap(acc + diff(val, fpsState[index - 1])),
+    0 as Milliseconds,
+  ) / (fpsState.length - 1))
   const fps = 1000 / averageTime
 
   const fpsText: GameText = {
@@ -1023,9 +1044,9 @@ export const movement: movement = (state) => {
           time,
         } = effectState
 
-        if (jump in keys && now - keys[jump] < 1000) {
-          const delta = (time.now - keys[jump]) / 1000
-          const y = (1 - delta) * -100
+        const delta: Milliseconds = diff(now, keys[jump])
+        if (jump in keys && delta < 1000) {
+          const y = (1 - toSeconds(delta)) * -100
           debugLines.setState(({ lines }) => {
             lines[4] = `jump: ${y.toFixed(1)}, now: ${now} - ${keys[jump]}`
             return { lines }
@@ -1063,7 +1084,7 @@ export const movement: movement = (state) => {
           time: { now, previous },
         } = effectState
 
-        const delta = (now - previous) / 1000
+        const delta: Seconds = toSeconds(diff(now, previous))
 
         if (isZoomed && zoom > 0.5) {
           return Continue({
@@ -1128,9 +1149,10 @@ export const collisionResolution: collisionResolution = (state, gameElements) =>
       const [ diffX, diffY ] = [
         // Where is the element in relation to the player?
         // e.g. elem (50, -50) - player (-50, 50) = (100, -100)
-        W((..._) => elem.x - player.x, elem.x, player.x),
-        W((..._) => elem.y - player.y, elem.y, player.y),
+        diff(elem.x, player.x),
+        diff(elem.y, player.y),
       ]
+      // XXX why are we dividing by 10 here? should this be removed?
       // Is the player movement in direction of the element?
       const moveX = W((..._) => velocity.x / 10, velocity.x)
       const moveY = W((..._) => velocity.y / 10, velocity.y)
@@ -1160,11 +1182,11 @@ export const collisionResolution: collisionResolution = (state, gameElements) =>
         //console.log([isInsideElemX, isInsideElemY], "isInsideElem")
         if (isInsideElemX && isInsideElemY) {
           const correctX: X = velocity.x > 0
-            ? leftElemX - rightPlayerX as X
-            : rightElemX - leftPlayerX as X
+            ? diff(leftElemX, rightPlayerX)
+            : diff(rightElemX, leftPlayerX)
           const correctY: Y = velocity.y > 0
-            ? upElemY - downPlayerY as Y
-            : downElemY - upPlayerY as Y
+            ? diff(upElemY, downPlayerY)
+            : diff(downElemY, upPlayerY)
 
           // 1. Check which has the smallest rounded, absolute change
           // 2. If smallest, use said smallest change
@@ -1232,8 +1254,8 @@ export const initGame = (context: CanvasRenderingContext2D) => {
       width: context.canvas.width as X,
       height: context.canvas.height as Y,
     },
-    time: { now: 0, previous: 0 },
-    lastFrame: 0,
+    time: { now: 0 as Milliseconds, previous: 0 as Milliseconds },
+    lastFrame: 0 as Milliseconds,
     player: {
       x: context.canvas.width * 0.5 as X,
       y: context.canvas.height * 0.5 as Y,
@@ -1254,7 +1276,8 @@ export const initGame = (context: CanvasRenderingContext2D) => {
 
   let debugOnce = true
 
-  const renderFrame = (now: number) => {
+  const renderFrame = (_now: number) => {
+    const now = _now as Milliseconds
     const state = scopedState.getState()
 
     if (Object.keys(state.chunks).length === 0) {
@@ -1272,7 +1295,7 @@ export const initGame = (context: CanvasRenderingContext2D) => {
       y: state.screen.y - (state.dimensions.height / state.zoom * 0.5) + state.dimensions.height * 0.5 as Y,
     }
 
-    const delta = now - state.lastFrame
+    const delta = diff(now, state.lastFrame)
     state.time = { previous: state.time.now, now }
 
     const effectState = runEffects(state)
@@ -1316,7 +1339,8 @@ export const initGame = (context: CanvasRenderingContext2D) => {
       renderThoseLayers(movedState, visibleElements)
       state.lastFrame = now
 
-      const dateNow = Date.now()
+      const dateNow: Milliseconds
+        = wrap(Date.now())
       fpsState = fpsState.concat([dateNow]).slice(-1000)
     }
 
