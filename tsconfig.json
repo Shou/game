@@ -5,6 +5,7 @@
     "module": "esnext",
     "target": "es5",
     "allowJs": true,
+    "jsx": "react",
     "lib": [
       "dom",
       "esnext"

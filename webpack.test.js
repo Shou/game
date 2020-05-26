@@ -2,7 +2,7 @@ const path = require("path")
 const config = require("./webpack.common.js")
 
 module.exports = Object.assign(config, {
-  entry: "./test/index.test.ts",
+  entry: "./test/index.ts",
   output: {
     filename: "test.js",
     path: path.resolve(__dirname, "dist-test"),

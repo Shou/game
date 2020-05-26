@@ -1,23 +1,10 @@
-
-import * as React from "react"
-import Prando from "prando"
-import { range, minBy, keys, sortBy } from "ramda"
-
+import * as Assets from "./Assets"
 import {
-  ActiveKeys,
-  GameChunks,
-  GameElement,
-  GameElements,
-  GameImage,
-  GameLinearGradient,
-  GameRect,
-  GameState,
-  GameText,
-  Player,
-  UserSettings,
-  coerce,
-  wrap,
-} from "./Types"
+  ChunkCoord,
+  CHUNK_RATIO,
+  toChunkCoord,
+} from "./Chunks"
+import * as Debug from "./Debug"
 import * as Effects from "./Effects"
 import {
   Coord,
@@ -27,53 +14,69 @@ import {
   Seconds,
   X,
   Y,
-  cantor,
+  abs,
   ceil,
   diff,
   dot,
   floor,
+  fromCantor,
+  PI,
+  range,
   round,
   shuffle,
+  sign,
+  sqrt,
+  sum,
+  toCantor,
   toSeconds,
 } from "./Math"
-import * as Assets from "./Assets"
+import * as Random from "./Random"
+import { DAY_CYCLE } from "./Scenery"
 import { ScopedState } from "./ScopedState"
 import * as State from "./ScopedState"
-import * as Debug from "./Debug"
+import {
+  CoreElem,
+  GameArc,
+  GameChunks,
+  GameElement,
+  GameElements,
+  GameImage,
+  GameLine,
+  GameLinearGradient,
+  GameRect,
+  GameText,
+} from "./Texture"
+import {
+  ActiveKeys,
+  GameState,
+  Player,
+  UserSettings,
+  coerce,
+  defaultSettings,
+  mapCoerce,
+  wrap,
+} from "./Types"
+import * as World from "./World"
+
+import Prando from "prando"
+import { minBy, sortBy } from "ramda"
+import * as React from "react"
 
 // 314 smoke math
 const {
-  PI, sin, cos, abs, min, max, pow, random, sign, atan2
+  sin, cos, min, max, pow, random, atan2,
 } = Math
 
 
-export const defaultSettings = {
-  keybindings: {
-    up: "w",
-    left: "a",
-    down: "s",
-    right: "d",
-    jump: " ",
-    sprint: "Shift",
-    zoom: "m",
-  },
-  fps: 30,
-  seed: floor(random() * 10),
-}
+// NOTES
+// - Maybe we should use timestamps instead of booleans... everywhere??!?!?
+//   - Then we can calculate things like e.g. last time feet touched ground,
+//     last time we were airborne, etc
 
-export const CHUNK_SIZE = 100
 
-type merge = (chunksA: GameChunks, chunksB: GameChunks) => GameChunks
-const merge: merge = (chunksA, chunksB) => {
-  let acc = { ...chunksA }
-
-  for (const k in chunksB) {
-    acc[k] = (acc[k] || []).concat(chunksB[k])
-  }
-
-  return acc
-}
-
+// NOTE apparently this is called spatial hashing and it's useful for infinite
+//      worlds but dynamic quad-trees are better if your game size is fixed,
+//      but we don't know what that sik algorithm is or does yet lol
 type getScreenChunks = (state: GameState) => GameElements
 export const getScreenChunks: getScreenChunks = (state) => {
   const {
@@ -82,10 +85,13 @@ export const getScreenChunks: getScreenChunks = (state) => {
     chunks,
   } = state
 
+  let coords = { x: 0 as X, y: 0 as Y } as ChunkCoord
   let blocks: GameElements = []
-  for (let ix = floor(x / CHUNK_SIZE); ix < ceil((x + width) / CHUNK_SIZE); ix++) {
-    for (let iy = floor(y / CHUNK_SIZE); iy < ceil((y + height) / CHUNK_SIZE); iy++) {
-      const elems = chunks?.[cantor(ix, iy)]
+  for (let ix = floor(x * CHUNK_RATIO); ix < ceil((x + width) * CHUNK_RATIO + 1); ix++) {
+    for (let iy = floor(y * CHUNK_RATIO); iy < ceil((y + height) * CHUNK_RATIO + 1); iy++) {
+      coords.x = coerce(ix)
+      coords.y = coerce(iy)
+      const elems = chunks?.[toCantor(coords)]
       if (elems?.length > 0) {
         blocks = blocks.concat(elems)
       }
@@ -95,43 +101,58 @@ export const getScreenChunks: getScreenChunks = (state) => {
   return blocks
 }
 
-
-// 60 seconds
-export const DAY_CYCLE: number = 60 * pow(10, 3)
-
 export type renderGameElement = (
   context: CanvasRenderingContext2D,
   gameElement: GameElement,
 ) => void
 export const renderGameElement: renderGameElement = (context, gameElement) => {
-  if ("style" in gameElement && gameElement.style != null) {
-    context.fillStyle = gameElement.style
+  const { texture, coord } = gameElement
+
+  if ("style" in texture && texture.style != null) {
+    context.fillStyle = texture.style
+    context.strokeStyle = texture.style
   }
-  if ("filter" in gameElement && gameElement.filter != null) {
-    context.filter = gameElement.filter
+  if ("filter" in texture && texture.filter != null) {
+    context.filter = texture.filter
   }
-  if ("position" in gameElement && gameElement.position === "top-left") {
+  if ("position" in texture && texture.position === "top-left") {
+    if ("radius" in texture) {
+      coord.x = coord.x + texture.radius as X
+      coord.y = coord.y + texture.radius as Y
+    }
   } else {
-    gameElement.x = diff(gameElement.x, gameElement.width * 0.5 as X)
-    gameElement.y = diff(gameElement.y, gameElement.height * 0.5 as Y)
+    if ("width" in texture && "height" in texture) {
+      coord.x = diff(coord.x, texture.width * 0.5 as X)
+      coord.y = diff(coord.y, texture.height * 0.5 as Y)
+    }
   }
 
-  switch (gameElement._tag) {
+  switch (texture.type) {
     case "GameImage": {
-      const { image, x, y, width, height } = gameElement as GameImage
-      context.drawImage(image, x, y, width, height)
+      const {
+        image,
+        width, height
+      }: GameImage = texture
+      const { x, y, } = coord
+      context.drawImage(image, coord.x, y, width, height)
       break
     }
 
     case "GameText": {
-      const { font, text, x, y, width, height } = gameElement as GameText
+      const {
+        font,
+        text,
+        width, height,
+      }: GameText = texture
+      const { x, y, } = coord
       context.font = `${font.size}px ${font.family}`
       context.fillText(text, x, y, width)
       break
     }
 
     case "GameRect": {
-      const { x, y, width, height } = gameElement as GameRect
+      const { width, height, }: GameRect = texture
+      const { x, y, } = coord
       context.fillRect(x, y, width, height)
       break
     }
@@ -141,22 +162,56 @@ export const renderGameElement: renderGameElement = (context, gameElement) => {
         start,
         stop,
         colorStops,
-        x,
-        y,
-        width,
-        height,
-      } = gameElement as GameLinearGradient
+        width, height,
+      }: GameLinearGradient = texture
+      const { x, y, } = coord
       const gradient = context.createLinearGradient(start.x, start.y, stop.x, stop.y)
       colorStops.forEach(({ offset, color }) => gradient.addColorStop(offset, color))
       context.fillStyle = gradient
       context.fillRect(x, y, width, height)
       break
     }
+
+    case "GameLine": {
+      const {
+        width, height,
+        lineWidth,
+      } = texture
+      const { x, y, } = coord
+      context.lineWidth = lineWidth
+      context.beginPath()
+      context.moveTo(x, y)
+      context.lineTo(x + width, y + height)
+      context.stroke()
+      break
+    }
+
+    case "GameArc": {
+      const {
+        radius,
+        startAngle,
+        endAngle,
+        antiClockwise,
+        fill,
+      }: GameArc = texture
+      const { x, y, } = coord
+      context.beginPath()
+      context.arc( x, y, radius, startAngle, endAngle, antiClockwise)
+      if (fill) {
+        context.fill()
+      } else {
+        context.stroke()
+      }
+      break
+    }
+
+    default: {
+      const totalityCheck: never = texture
+      throw new Error()
+    }
   }
 
-  if ("filter" in gameElement && gameElement.filter != null) {
-    context.filter = "none"
-  }
+  context.filter = "none"
 }
 
 export const brightness: (t: number) => number = t =>
@@ -184,37 +239,45 @@ export const renderSky: renderSky = (state) => {
   // f n = min 255 $ max 0.1 (sin (n * pi * 1.8 - 1.4) * 2) * 255
   const blue = min(255, max(0.1, sin(t * PI * 1.8 - 1.4) * 2) * 255)
 
-  const gradient: GameLinearGradient = {
-    _tag: "GameLinearGradient",
-    colorStops: [
-      { offset: 0, color: `rgb(0,${green},${blue})` },
-      { offset: 1 - (red / 255 * 0.5), color: `rgb(0,${green},${blue})` },
-      { offset: 1, color: `rgb(183, 29, 22)` },
-    ],
-    start: { x: 0, y: 0 } as Coord,
-    stop: { x: 0, y: dimensions.height } as Coord,
-    x: 0 as X,
-    y: 0 as Y,
-    width: dimensions.width as X,
-    height: dimensions.height as Y,
-    movementFactors: { x: 0, y: 0 } as Coord,
-    collidable: false,
-    position: "top-left",
-    layer: 11 as Natural,
+  const gradient: CoreElem<GameLinearGradient> = {
+    texture: {
+      type: "GameLinearGradient",
+      colorStops: [
+        { offset: 0, color: `rgb(0,${green},${blue})` },
+        { offset: 1 - (red / 255 * 0.5), color: `rgb(0,${green},${blue})` },
+        { offset: 1, color: `rgb(183, 29, 22)` },
+      ],
+      start: { x: 0, y: 0 } as Coord,
+      stop: { x: 0, y: dimensions.height } as Coord,
+      width: dimensions.width,
+      height: dimensions.height,
+      movementFactors: { x: 0, y: 0 } as Coord,
+      collidable: false,
+      position: "top-left",
+      layer: 11 as Natural,
+    },
+    coord: {
+      x: 0 as X,
+      y: 0 as Y,
+    } as Coord,
   }
 
-  const stars: Array<GameImage> = [0, 1].map(index => ({
-    _tag: "GameImage",
-    image: Assets.starsImage,
-    x: Assets.starsImage.width * index as X,
-    y: 0 as Y,
-    width: Assets.starsImage.width as X,
-    height: Assets.starsImage.height as Y,
-    filter: `opacity(${(1 - blue / 255) * 100}%)`,
-    movementFactors: { x: 0.1, y: 0.1 } as Coord,
-    collidable: false,
-    position: "top-left",
-    layer: 12 as Natural,
+  const stars: Array<CoreElem<GameImage>> = [0, 1].map(index => ({
+    texture: {
+      type: "GameImage",
+      image: Assets.starsImage,
+      width: dimensions.width,
+      height: dimensions.height,
+      filter: `opacity(${(1 - blue / 255) * 100}%)`,
+      movementFactors: { x: 0.05, y: 0.05 } as Coord,
+      collidable: false,
+      position: "top-left",
+      layer: 12 as Natural,
+    },
+    coord: {
+      x: Assets.starsImage.width * index as X,
+      y: 0 as Y,
+    } as Coord,
   }))
 
   return [
@@ -223,6 +286,7 @@ export const renderSky: renderSky = (state) => {
   ]
 }
 
+const rays: Array<CoreElem<GameLine>> = []
 export type renderSun = (state: GameState) => GameElements
 export const renderSun: renderSun = (state) => {
   const {
@@ -230,6 +294,11 @@ export const renderSun: renderSun = (state) => {
     dimensions,
   } = state
   const t = (now % DAY_CYCLE) / DAY_CYCLE
+
+  if (t < 0.20 || t > 0.80) {
+    return []
+  }
+
   const [width, height] = [128, 128] as [X, Y]
   const radius = min(dimensions.width, dimensions.height) * 0.67
   const [originX, originY] = [
@@ -237,33 +306,62 @@ export const renderSun: renderSun = (state) => {
     dimensions.height - 1,
   ] as [X, Y]
   const [x, y] = [
-    sin(PI * 2 * t) * radius + originX - width * 0.5 as X,
-    cos(PI * 2 * t) * radius + originY - width * 0.5 as Y,
-  ]
+    sin(PI * 2 * t) * radius + originX,
+    cos(PI * 2 * t) * radius + originY,
+  ] as [X, Y]
 
-  const sun: GameImage = {
-    _tag: "GameImage",
-    image: Assets.sunImage,
-    x,
-    y,
-    width,
-    height,
-    filter: [
-      `saturate(${min(100, 110 - brightness(t))}%)`,
-      `hue-rotate(${redness(t) * -90}deg)`,
-    ].join(" "),
-    movementFactors: { x: 0, y: 0 } as Coord,
-    collidable: false,
-    layer: 13 as Natural,
+  const sun: CoreElem<GameArc> = {
+    texture: {
+      type: "GameArc",
+      radius: 100 as Natural,
+      startAngle: 0,
+      endAngle: 360,
+      antiClockwise: false,
+      fill: true,
+      filter: [
+        `saturate(${min(100, 110 - brightness(t))}%)`,
+        `hue-rotate(${redness(t) * -90}deg)`,
+      ].join(" "),
+      movementFactors: { x: 0, y: 0 } as Coord,
+      collidable: false,
+      layer: 13 as Natural,
+    },
+    coord: {
+      x, y,
+    } as Coord,
   }
 
-  return [ sun ]
+  const rays: Array<CoreElem<GameLine>> = []
+  const r = 200
+  const n = 100
+  for (let i = 0; i < n; i++) {
+    rays.push({
+      texture: {
+        type: "GameLine",
+        width: sin(PI * 2 * (i / n)) * r as X,
+        height: cos(PI * 2 * (i / n)) * r as Y,
+        lineWidth: 15 as Natural,
+        collidable: false,
+        movementFactors: { x: 0, y: 0 } as Coord,
+        layer: 13 as Natural,
+        style: "hsla(50,100%,50%,0.05)",
+      },
+      coord: {
+        x, y,
+      } as Coord,
+    })
+  }
+
+  return [
+    sun,
+    ...rays,
+  ]
 }
 
 export type renderClouds = (state: GameState) => GameElements
 export const renderClouds: renderClouds = (state) => {
   const {
-    settings,
+    settings: { seed },
     dimensions,
     time: { now },
     screen,
@@ -278,54 +376,53 @@ export const renderClouds: renderClouds = (state) => {
   ]
   const movementFactors = { x: 0.5, y: 0.5 } as Coord
 
-  const clouds: Array<GameImage> = []
+  const clouds: Array<CoreElem<GameImage>> = []
   if (clouds.length === 0) {
-    const rng = new Prando(settings.seed)
+    const rng = new Prando(seed)
     const images = shuffle(Assets.cloudImages, () => rng.next(0, 1))
-    const walk: Array<Coord> = randomWalk(settings.seed, 3 as X)
+    const walk: Array<Coord> = Random.walk(10, 3 as Y, 0 as Y, () => rng.next(0, 1))
 
     for (const coord of walk) {
-      const {
-        x: oldX,
-        y: oldY,
-      } = clouds.length > 0
-        ? walk[walk.length - 1]
-        : { x: -500, y: 100 } as Coord
-
-      const cloud: GameImage = {
-        _tag: "GameImage",
-        image: images[clouds.length % images.length],
-        x: oldX + coord.x * width as X,
-        y: oldY + coord.y * height as Y,
-        width,
-        height,
-        movementFactors,
-        collidable: false,
-        filter: [
-          `brightness(${brightness(t)}%)`,
-          `hue-rotate(${redness(t) / 255 * 120}deg)`,
-          `opacity(90%)`,
-        ].join(" "),
-        layer: 14 as Natural,
+      const cloud: CoreElem<GameImage> = {
+        texture: {
+          type: "GameImage",
+          image: images[clouds.length % images.length],
+          width,
+          height,
+          movementFactors,
+          collidable: false,
+          filter: [
+            `brightness(${brightness(t)}%)`,
+            `hue-rotate(${redness(t) / 255 * 120}deg)`,
+            `opacity(90%)`,
+          ].join(" "),
+          layer: 14 as Natural,
+        },
+        coord: {
+          x: coord.x * width as X,
+          y: coord.y * height as Y,
+        } as Coord,
       }
 
       clouds.push(cloud)
     }
   }
 
-  Debug.debugLines.modify(({ lines }) => {
+  Debug.text.modify(({ lines }) => {
     lines[0] = clouds.map(
-      cloud => `{ ${(cloud.x + x).toFixed(1)}, ${(cloud.y + y).toFixed(1)} }`
+      cloud => `{ ${(cloud.coord.x + x).toFixed(1)}, ${(cloud.coord.y + y).toFixed(1)} }`
     ).join(", ")
     return { lines }
   })
 
   // TODO multiply these by something like (screen.x / canvas.width) or w/e
   // the end goal is to make the clouds repeat
-  return clouds.map(cloud => ({
-    ...cloud,
-    x: cloud.x + x as X,
-    y: cloud.y + y as Y,
+  return clouds.map(({ texture, coord }) => ({
+    texture,
+    coord: {
+      x: coord.x + x as X,
+      y: coord.y + y as Y,
+    } as Coord,
   }))
 }
 
@@ -337,201 +434,92 @@ const renderMountains: renderMountains = (state) => {
 
   const t: number = (now % DAY_CYCLE) / DAY_CYCLE
 
-  const mountain: GameImage = {
-    _tag: "GameImage",
-    image: Assets.mountainImages[0],
-    x: 0 as X,
-    y: 500 as Y,
-    width: 512 as X,
-    height: 512 as Y,
-    movementFactors: { x: 0.1, y: 0.1 } as Coord,
-    collidable: false,
-    filter: `brightness(${brightness(t)}%)`,
-    layer: 0 as Natural, ////////////////////////////////////////// TODO FIXME
+  const mountain: CoreElem<GameImage> = {
+    texture: {
+      type: "GameImage",
+      image: Assets.mountainImages[0],
+      width: 512 as X,
+      height: 512 as Y,
+      movementFactors: { x: 0.1, y: 0.1 } as Coord,
+      collidable: false,
+      filter: `brightness(${brightness(t)}%)`,
+      layer: 0 as Natural, ////////////////////////////////////////// TODO FIXME
+    },
+    coord: {
+      x: 0 as X,
+      y: 500 as Y,
+    } as Coord,
   }
   return [ mountain ]
 }
 
-// NOTE: will return _at least_ one coord object
-export type randomWalk = (
-  seed: number,
-  xMax: X,
-) => Array<Coord>
-export const randomWalk: randomWalk = (seed, xMax) => {
-  const rng = new Prando(seed * xMax)
-  const x = round(rng.next(1, min(xMax, 10))) as number as X
-  const y = round(rng.next(-3, 3)) as number as Y
-  const coord: Coord = { x, y }
-
-  return x < xMax
-    ? [ coord ].concat(randomWalk(seed, diff(xMax, x)))
-    : [ coord ]
-}
-
-// circle t r m
-//  = fmap (map (\(x, y) -> (x + m, y)))
-//  . fmap (scanr1 (\(ox, oy) (x, y) -> (ox + x, oy + y)))
-//  . replicateM t $ (,) <$> fmap (\n -> r * cos (n * pi * 2)) rand <*> fmap (\n -> r * sin (n * pi * 2)) rand
-//      where rand = Random.randomRIO @Double (0, 1)
-type randomWalk2D =
-  (t: number, r: number, m: X, rand: () => number) => Array<Coord>
-
-const randomWalk2D: randomWalk2D = (t, r, m, rand) => {
-  let acc: Array<Coord> = [ { x: 0, y: 0 } as Coord ]
-  for (let i = 0; i < t; i++) {
-    const [rx, ry] = [1,2].map(_ => rand() * PI * 2)
-    const { x: oldX, y: oldY } = acc[acc.length - 1]
-    const [x, y] = [r * cos(rx) + oldX, r * sin(ry) + oldY]
-    acc.push({ x, y } as Coord)
-  }
-  return acc.map(({ x, y }) => ({ x: x + m as X, y }))
-}
-
-let caves: GameElements = []
-export type renderCaves = (state: GameState) => GameElements
-const renderCaves: renderCaves = (state) => {
-  const {
-    time: { now },
-    settings,
-  } = state
-  const t = (now % DAY_CYCLE) / DAY_CYCLE
-
-  if (caves.length === 0) {
-    const rng = new Prando(settings.seed)
-    const walk = randomWalk2D(1000, 3, 10 as X, () => rng.next(0, 1))
-    const sortedX = [ ...walk].sort((a, b) => a.x - b.x)
-    const sortedY = [ ...walk].sort((a, b) => a.y - b.y)
-
-    const [minX, maxX]: [Integer, Integer] = [
-      round(sortedX[0].x),
-      round(sortedX[sortedX.length - 1].x),
-    ]
-    const [minY, maxY]: [Integer, Integer] = [
-      round(sortedY[0].y),
-      round(sortedY[sortedY.length - 1].y),
-    ]
-
-    // This looks immoral but whatever lol javascript sucks why does (==)
-    // behave on references and not structure smh
-    const walkSet: Set<string> = new Set(
-      walk.reduce((acc, coord) => acc.concat(
-        [-1, 0, 1].map(i =>
-          [-1, 0, 1].map(j => 
-            `${coerce(round(coord.x + i))}x${coerce(round(coord.y + j))}`
-          )
-        ).flat()
-      ), [] as Array<string>).flat()
-    )
-
-    for (let ix = minX; ix < maxX; ix++) {
-      for (let iy = minY; iy < maxY; iy++) {
-        if (!walkSet.has(`${ix}x${iy}`)) {
-          caves.push({
-            _tag: "GameRect",
-            x: minX * 100 + ix * 100 as X,
-            y: abs(minY * 100) + iy * 100 as Y,
-            width: 100 as X,
-            height: 100 as Y,
-            style: "brown",
-            movementFactors: { x: 1, y: 1 } as Coord,
-            collidable: true,
-            layer: 32 as Natural,
-          })
-        }
-      }
-    }
-  }
-
-  return caves
-}
-
-let grasses: Array<GameRect> = []
-export type renderGrass = (state: GameState) => GameElements
-export const renderGrass: renderGrass = (state) => {
-  const {
-    time: { now },
-    dimensions,
-    settings,
-  } = state
-  const t = (now % DAY_CYCLE) / DAY_CYCLE
-
-  const [width, height] = [100, 100] as [X, Y]
-
-  // evil state
-  // TODO move map generation into GameState
-  if (grasses.length === 0) {
-    const walk = randomWalk(settings.seed, 200 as X)
-    const walk2 = randomWalk(settings.seed + walk[0].x, 200 as X)
-    grasses = walk.reduce((acc, { x, y }, i) => {
-      const {
-        x: oldX,
-        y: oldY
-      } = i > 0 ? acc[acc.length - 1] : { x: 0, y: 0 } as Coord
-      console.log(acc[acc.length - 1], `acc[${acc.length - 1}]`)
-      const xRange = range(x >= 0 ? 0 : x, x >= 0 ? x : 0) as Array<X>
-      const yRange = range(y >= 0 ? 0 : y, y >= 0 ? y : 0) as Array<Y>
-      const floor: Array<GameRect> = xRange.map(i => ({
-        _tag: "GameRect",
-        x: oldX + i * width as X,
-        y:  oldY + y * height as Y,
-        width,
-        height,
-        style: "green",
-        filter: `brightness(${brightness(t)}%)`,
-        movementFactors: { x: 1, y: 1 } as Coord,
-        collidable: true,
-        layer: 32 as Natural,
-      }))
-      const wall: Array<GameRect> = yRange.map(i => ({
-        _tag: "GameRect",
-        x: oldX,
-        y: oldY + y * height as Y,
-        width,
-        height,
-        style: "green",
-        filter: `brightness(${brightness(t)}%)`,
-        movementFactors: { x: 1, y: 1 } as Coord,
-        collidable: true,
-        layer: 32 as Natural,
-      }))
-      return acc.concat(wall.concat(floor))
-    }, [] as Array<GameRect>).map(elem => ({
-      ...elem,
-      y: elem.y + dimensions.height as Y,
-    }))
-  }
-
-  // TODO do brightness/lighting somewhere more general
-  return grasses.map(grass => ({
-    ...grass,
-    filter: `brightness(${brightness(t)}%)`,
-  })) as GameElements
-}
-
+type PlayerTuple = [Coord, Coord, Coord, Coord, Coord]
+const previousPlayersState
+  = State.create<{ coords: Partial<PlayerTuple> }>({ coords: [] })
 export type renderPlayer = (gameState: GameState) => GameElements
 export const renderPlayer: renderPlayer = ({ player }) => {
-  const { x, y, width, height } = player
-  const playerElem: GameRect = {
-    _tag: "GameRect",
+  const {
     x, y,
     width, height,
-    style: `rgba(0,0,0,0.5)`,
-    collidable: true,
-    movementFactors: { x: 1, y: 1 } as Coord,
-    layer: 33 as Natural,
+    velocity,
+  } = player
+
+  const coord = { x, y } as Coord
+
+  const playerElem: CoreElem<GameRect> = {
+    texture: {
+      type: "GameRect",
+      width, height,
+      style: `rgba(0,0,0,0.5)`,
+      collidable: true,
+      movementFactors: { x: 1, y: 1 } as Coord,
+      layer: 33 as Natural,
+    },
+    coord,
   }
-  const outlineElem: GameRect = {
-    _tag: "GameRect",
-    x,
-    y,
-    width: width + 10 as X,
-    height: height + 10 as Y,
-    style: `rgba(255,255,255,0.5)`,
-    collidable: true,
-    movementFactors: { x: 1, y: 1 } as Coord,
-    layer: 33 as Natural,
+  const outlineElem: CoreElem<GameRect> = {
+    texture: {
+      type: "GameRect",
+      width: width + 10 as X,
+      height: height + 10 as Y,
+      style: `rgba(255,255,255,0.5)`,
+      collidable: false,
+      movementFactors: { x: 1, y: 1 } as Coord,
+      layer: 33 as Natural,
+    },
+    coord,
   }
+  const previousCoords = previousPlayersState.get().coords.filter(
+    (c): c is Coord => c !== undefined
+  )
+  let previousPlayers: Array<CoreElem<GameRect>> = []
+  for (let i = 0; i < previousCoords.length; i++) {
+    const prevCoords = previousCoords[i]
+    previousPlayers.push({
+      texture: {
+        type: "GameRect",
+        width: width as X,
+        height: height as Y,
+        style: `rgba(240,0,50,${0.6 / (i + 1)})`,
+        collidable: false,
+        movementFactors: { x: 1, y: 1 } as Coord,
+        layer: 33 as Natural,
+      },
+      coord: prevCoords,
+    })
+  }
+  previousPlayersState.modify(({ coords }) => ({
+    coords: [
+      { x, y } as Coord,
+      coords[0],
+      coords[1],
+      coords[2],
+      coords[3],
+    ]
+  }))
+
   return [
+    ...previousPlayers,
     outlineElem,
     playerElem,
   ]
@@ -548,122 +536,150 @@ export const renderDebug: renderDebug = (state) => {
     screen,
   } = state
   const t = (now % DAY_CYCLE) / DAY_CYCLE
-  const averageTime = wrap(fpsState.slice(1).reduce(
-    (acc, val, index) => acc + diff(val, fpsState[index - 1]) as Milliseconds,
-    0 as Milliseconds,
-  ) / (fpsState.length - 1))
-  const fps = 1000 / averageTime
+  let totalTime = 0 as Milliseconds
+  for (let i = 1; i < fpsState.length; i++) {
+    totalTime = totalTime + fpsState[i] - fpsState[i - 1] as Milliseconds
+  }
+  const fps = 1000 / (totalTime * (1 / max(1, fpsState.length - 1)))
 
-  const fpsText: GameText = {
-    _tag: "GameText",
-    style: "white",
-    font: { size: 30, family: "Open Sans Mono" },
-    text: `${fps.toFixed(1)} fps`,
-    x: dimensions.width - 300 as X,
-    y: 40 as Y,
-    width: 200 as X,
-    height: 30 as Y,
-    movementFactors: { x: 0, y: 0 } as Coord,
-    collidable: false,
-    position: "top-left",
-    layer: 101 as Natural,
+  const fpsText: CoreElem<GameText> = {
+    texture: {
+      type: "GameText",
+      style: "white",
+      font: { size: 30, family: "Open Sans Mono" },
+      text: `${fps.toFixed(1)} fps`,
+      width: 200 as X,
+      height: 30 as Y,
+      movementFactors: { x: 0, y: 0 } as Coord,
+      collidable: false,
+      position: "top-left",
+      layer: 101 as Natural,
+    },
+    coord: {
+      x: dimensions.width - 300 as X,
+      y: 40 as Y,
+    } as Coord,
   }
 
-  const timeText: GameText = {
-    _tag: "GameText",
-    font: { size: 30, family: "Open Sans Mono" },
-    text: `Time: ${(t * 24).toFixed(1)}h;`,
-    style: "white",
-    x: 25 as X,
-    y: 40 as Y,
-    width: 200 as X,
-    height: 30 as Y,
-    movementFactors: { x: 0, y: 0 } as Coord,
-    collidable: false,
-    position: "top-left",
-    layer: 101 as Natural,
+  const timeText: CoreElem<GameText> = {
+    texture: {
+      type: "GameText",
+      font: { size: 30, family: "Open Sans Mono" },
+      text: `Time: ${(t * 24).toFixed(1)}h;`,
+      style: "white",
+      width: 200 as X,
+      height: 30 as Y,
+      movementFactors: { x: 0, y: 0 } as Coord,
+      collidable: false,
+      position: "top-left",
+      layer: 101 as Natural,
+    },
+    coord: {
+      x: 25 as X,
+      y: 40 as Y,
+    } as Coord,
   }
 
-  const playerText: GameText = {
-    _tag: "GameText",
-    font: { size: 30, family: "Open Sans Mono" },
-    text: `Player: ${player.x.toFixed(1)} x ${player.y.toFixed(1)}`,
-    style: "white",
-    x: 25 as X,
-    y: 80 as Y,
-    width: 200 as X,
-    height: 30 as Y,
-    movementFactors: { x: 0, y: 0 } as Coord,
-    collidable: false,
-    position: "top-left",
-    layer: 101 as Natural,
+  const playerText: CoreElem<GameText> = {
+    texture: {
+      type: "GameText",
+      font: { size: 30, family: "Open Sans Mono" },
+      text: `Player: ${player.x.toFixed(1)} x ${player.y.toFixed(1)}`,
+      style: "white",
+      width: 200 as X,
+      height: 30 as Y,
+      movementFactors: { x: 0, y: 0 } as Coord,
+      collidable: false,
+      position: "top-left",
+      layer: 101 as Natural,
+    },
+    coord: {
+      x: 25 as X,
+      y: 80 as Y,
+    } as Coord,
   }
 
-  const screenText: GameText = {
-    _tag: "GameText",
-    font: { size: 30, family: "Open Sans Mono" },
-    text: `Screen: ${screen.x.toFixed(1)} x ${screen.y.toFixed(1)}`,
-    style: "white",
-    x: 25 as X,
-    y: 120 as Y,
-    width: 200 as X,
-    height: 30 as Y,
-    movementFactors: { x: 0, y: 0 } as Coord,
-    collidable: false,
-    position: "top-left",
-    layer: 101 as Natural,
+  const screenText: CoreElem<GameText> = {
+    texture: {
+      type: "GameText",
+      font: { size: 30, family: "Open Sans Mono" },
+      text: `Screen: ${screen.x.toFixed(1)} x ${screen.y.toFixed(1)}`,
+      style: "white",
+      width: 200 as X,
+      height: 30 as Y,
+      movementFactors: { x: 0, y: 0 } as Coord,
+      collidable: false,
+      position: "top-left",
+      layer: 101 as Natural,
+    },
+    coord: {
+      x: 25 as X,
+      y: 120 as Y,
+    } as Coord,
   }
 
-  const visibilityBlock: GameRect = {
-    _tag: "GameRect",
-    style: "rgba(255,255,255, 0.1)",
-    x: 150 as X,
-    y: 150 as Y,
-    width: dimensions.width - 300 as X,
-    height: dimensions.height - 300 as Y,
-    collidable: false,
-    movementFactors: { x: 0, y: 0 } as Coord,
-    position: "top-left",
-    layer: 101 as Natural,
-  }
-
-  const lines: Array<GameText> = Debug.debugLines.get().lines.reduce((acc, text, i) => {
+  const lines: Array<CoreElem<GameText>> = Debug.text.get().lines.reduce((acc, text, i) => {
     if (text !== null) {
       return acc.concat([
         {
-          _tag: "GameText",
-          font: { size: 30, family: "Open Sans Mono" },
-          text,
-          style: "white",
-          x: 150 as X,
-          y: 150 + (i + 1) * 30 as Y,
-          width: dimensions.width as X,
-          height: 30 as Y,
-          movementFactors: { x: 0, y: 0 } as Coord,
-          collidable: false,
-          position: "top-left",
-          layer: 101 as Natural,
+          texture: {
+            type: "GameText",
+            font: { size: 30, family: "Open Sans Mono" },
+            text,
+            style: "white",
+            width: dimensions.width as X,
+            height: 30 as Y,
+            movementFactors: { x: 0, y: 0 } as Coord,
+            collidable: false,
+            position: "top-left",
+            layer: 101 as Natural,
+          },
+          coord: {
+            x: 150 as X,
+            y: 150 + (i + 1) * 30 as Y,
+          } as Coord,
         }
       ])
     }
 
     return acc
-  }, [] as Array<GameText>)
+  }, [] as Array<CoreElem<GameText>>)
+
+  const visuals: GameElements
+    = Debug.visuals.get().elems.reduce((acc, elem, i) => {
+      return elem !== null
+        ? acc.concat([ elem ])
+        : acc
+    }, [] as GameElements)
 
   return [
     timeText,
     fpsText,
     playerText,
     screenText,
-    visibilityBlock,
     ...lines,
+    ...visuals,
+    {
+      texture: {
+        type: "GameText",
+        font: { size: 30, family: "Open Sans Mono" },
+        text: `Visuals: ${Debug.visuals.get().elems.length}`,
+        width: 500 as X,
+        height: 30 as Y,
+        movementFactors: { x: 0, y: 0 } as Coord,
+        collidable: false,
+        position: "top-left",
+        layer: 101 as Natural,
+      },
+      coord: {
+        x: 100 as X,
+        y: dimensions.height - 100 as Y,
+      } as Coord,
+    },
   ]
 }
 
-export const staticLayers = [
-  renderGrass,
-  renderCaves,
-]
+export const staticLayers = []
 
 export const dynamicLayers = [
   renderSky,
@@ -684,36 +700,46 @@ export const renderThoseLayers: renderThoseLayers = (state, elems) => {
   const layers: Record<number, GameElements> = {}
 
   for (const gameElement of elems) {
+    const { texture, coord } = gameElement
     const {
-      x,
-      y,
-      width,
-      height,
       movementFactors: { x: moveX, y: moveY },
       layer,
-    } = gameElement
+    } = texture
+    const {
+      x, y,
+    } = coord
 
-    const fontSize = gameElement._tag !== "GameText"
-      ? {}
-      : { font: { ...gameElement.font, size: gameElement.font.size * zoom } }
+    const size = "radius" in texture
+      ? { radius: texture.radius * zoom as Natural }
+      : {
+          width: texture.width * zoom as X,
+          height: texture.height * zoom as Y,
+        }
+
+    const fontSize = "font" in texture
+      ? { font: { ...texture.font, size: texture.font.size * zoom } }
+      : {}
 
     layers[layer] = (layers[layer] || []).concat([
       {
-        ...gameElement,
-        x: (x - screenX * moveX) * zoom as X,
-        y: (y - screenY * moveY) * zoom as Y,
-        width: width * zoom as X,
-        height: width * zoom as Y,
-        ...fontSize,
-      }
+        texture: {
+          ...texture,
+          ...size,
+          ...fontSize,
+        },
+        coord: {
+          x: (x - screenX * moveX) * zoom as X,
+          y: (y - screenY * moveY) * zoom as Y,
+        },
+      } as GameElement
     ])
   }
 
-  const sortedLayerKeys: Array<number>
-    = sortBy(id => id, keys(layers))
+  const sortedLayerKeys: Array<string>
+    = sortBy(parseInt, Object.keys(layers))
 
   for (const key of sortedLayerKeys) {
-    for (const gameElement of layers[key]) {
+    for (const gameElement of layers[key as unknown as number]) {
       renderGameElement(state.context, gameElement)
     }
   }
@@ -732,7 +758,7 @@ const runLayers: runLayers = (state, layers) => {
 
       for (const elem of elems) {
         const cantorPair: Natural
-          = cantor(floor(elem.x / CHUNK_SIZE), floor(elem.y / CHUNK_SIZE))
+          = toCantor(toChunkCoord(elem.coord))
 
         acc[cantorPair] = (acc[cantorPair] || []).concat([ elem ])
       }
@@ -782,11 +808,12 @@ export const movement: movement = (state) => {
   } = state
 
   // Time delta
-  const dt = (now - previous) / 1000
+  const dt: Seconds = toSeconds(diff(now, previous))
 
-  const halfPiFraction: (k: string) => number = k =>
-    min(1000, now - state.activeKeys[k]) / 1000 * PI * 0.5
+  const halfPiFraction: (k: string) => number
+    = k => min(1, (now - state.activeKeys[k]) * 0.001) * PI * 0.5
 
+  // TODO "stop" curve
   const moveLeft = keys.left in state.activeKeys
     ? max(1, velocity.x) * sin(halfPiFraction(keys.left)) * -20 as X
     : min(0, velocity.x + 1) as X
@@ -799,7 +826,7 @@ export const movement: movement = (state) => {
       effects.push(Effects.jumpEffect)
     }
 
-    if (keys.zoom in state.activeKeys) {
+    if (keys.zoom in state.activeKeys && (zoom === 1 || zoom === 0.5)) {
       const isZoomed = zoom === 1
       effects.push(Effects.zoomEffect(isZoomed))
     }
@@ -813,8 +840,8 @@ export const movement: movement = (state) => {
     min(800 * dt, round(n) === 0 ? 1 : (n < 0 ? n * 0.5 : n * 2)) as Y
 
   //console.log(gravity(jump || velocity.y), "gravity")
-  Debug.debugLines.modify(({ lines }) => {
-    lines[1] = `gravity: ${gravity(velocity.y).toFixed(1)}, airborne: ${airborne}`
+  Debug.text.modify(({ lines }) => {
+    lines[1] = `velocity: ${(moveLeft + moveRight).toFixed(1)} x ${gravity(velocity.y).toFixed(1)}, airborne: ${airborne}`
     return { lines }
   })
 
@@ -848,12 +875,13 @@ export const collisionResolution: collisionResolution = (state, gameElements) =>
 
     const correctedPlayer = gameElements.reduce((player, elem) => {
       const { velocity } = player
+      const { texture, coord } = elem
 
       const [ diffX, diffY ] = [
         // Where is the element in relation to the player?
         // e.g. elem (50, -50) - player (-50, 50) = (100, -100)
-        diff(elem.x, player.x),
-        diff(elem.y, player.y),
+        diff(coord.x, player.x),
+        diff(coord.y, player.y),
       ]
       // XXX why are we dividing by 10 here? should this be removed?
       // Is the player movement in direction of the element?
@@ -865,7 +893,8 @@ export const collisionResolution: collisionResolution = (state, gameElements) =>
       )
 
       //console.log(collidingCourse, "collidingCourse")
-      if (collidingCourse > 0.5) {
+      // TODO support round bois
+      if (collidingCourse > 0.5 && !("radius" in texture)) {
         // Player edges
         const rightPlayerX = player.x + player.width * 0.5 + velocity.x as X
         const leftPlayerX = player.x - player.width * 0.5 + velocity.x as X
@@ -873,13 +902,22 @@ export const collisionResolution: collisionResolution = (state, gameElements) =>
         const upPlayerY = player.y - player.height * 0.5 + velocity.y as Y
 
         // Element edges
-        const rightElemX = elem.x + elem.width * 0.5 as X
-        const leftElemX = elem.x - elem.width * 0.5 as X
-        const downElemY = elem.y + elem.height * 0.5 as Y
-        const upElemY = elem.y - elem.height * 0.5 as Y
+        const rightElemX = coord.x + texture.width * 0.5 as X
+        const leftElemX = coord.x - texture.width * 0.5 as X
+        const downElemY = coord.y + texture.height * 0.5 as Y
+        const upElemY = coord.y - texture.height * 0.5 as Y
 
         const isInsideElemX = leftPlayerX < rightElemX && rightPlayerX > leftElemX
         const isInsideElemY = upPlayerY < downElemY && downPlayerY > upElemY
+
+        //Debug.visuals.modify(({ elems }) => {
+        //  elems.push({
+        //    ...elem,
+        //    style: `rgba(255,255,255,0.3)`,
+        //  } as any)
+
+        //  return { elems }
+        //})
 
         //console.log([velocity.x, velocity.y], "velocity")
         //console.log([isInsideElemX, isInsideElemY], "isInsideElem")
@@ -898,19 +936,19 @@ export const collisionResolution: collisionResolution = (state, gameElements) =>
           // This ensures we don't move unnecessarily far when correcting
           const correctedVelocity = {
             x: round(abs(correctX)) <= round(abs(correctY))
-              ? velocity.x + correctX as X
+              ? sum(velocity.x, correctX)
               : velocity.x,
             y: round(abs(correctY)) <= round(abs(correctX))
-              ? velocity.y + correctY as Y
+              ? sum(velocity.y, correctY)
               : velocity.y,
-          }
+          } as Coord
           //console.log(correctedVelocity, "correctedVelocity")
 
           // Only if the player is touching _none_ of any elements, we're airborne
           const airborne = player.airborne && downPlayerY < upElemY
 
-          Debug.debugLines.modify(({ lines }) => {
-            lines[2] = `elem: ${elem.x}x${elem.y}, player: ${player.x.toFixed(1)}x${player.y.toFixed(1)}`
+          Debug.text.modify(({ lines }) => {
+            lines[2] = `elem: ${coord.x}x${coord.y}, player: ${player.x.toFixed(1)}x${player.y.toFixed(1)}`
             return { lines }
           })
 
@@ -927,13 +965,86 @@ export const collisionResolution: collisionResolution = (state, gameElements) =>
 
     return {
       ...correctedPlayer,
-      x: initPlayer.x + correctedPlayer.velocity.x as X,
-      y: initPlayer.y + correctedPlayer.velocity.y as Y,
+      x: sum(initPlayer.x, correctedPlayer.velocity.x),
+      y: sum(initPlayer.y, correctedPlayer.velocity.y),
     }
   }
 }
 
-export const initGame = (context: CanvasRenderingContext2D) => {
+type collisionResolution2 = (state: GameState) => any
+const collisionResolution2: collisionResolution2 = (state) => {
+  const {
+    chunks,
+    player,
+  } = state
+  const { velocity } = player
+
+  let elems: GameElements = []
+
+  // who needs type safety
+  const repel = (from: any, to: any) => diff(to, from) < 0 ? round(to - 0.1) : round(to)
+
+  // X is OK, Y is NOT OK
+  // Get the range of chunks from the player to the projected (velocity) position
+  const fromX = player.x * CHUNK_RATIO
+  const toX = (player.x + player.width * 0.5 * sign(velocity.x) + velocity.x) * CHUNK_RATIO
+  const rx = range(round(fromX), round(toX))
+
+  const fromY = player.y * CHUNK_RATIO
+  const toY = (player.y + player.height * 0.5 * sign(velocity.y) + velocity.y) * CHUNK_RATIO
+  const ry = range(
+    repel(toY, fromY),
+    repel(fromY, toY),
+  )
+
+  let firstCrash: Coord | null = null
+  for (const x of rx) {
+    for (const y of ry) {
+      const coord = { x: coerce(x) as X, y: coerce(y) as Y } as Coord
+      elems = elems.concat(chunks?.[toCantor(toChunkCoord(coord))] || [])
+      if (elems.length && !firstCrash) {
+        firstCrash = {
+          x: x * (1 / CHUNK_RATIO) + 50,
+          y: y * (1 / CHUNK_RATIO),
+        } as Coord
+      }
+    }
+  }
+
+  if (firstCrash !== null) {
+    Debug.visuals.modify(({ elems: ayylems }) => {
+      ayylems.push({
+        texture: {
+          type: "GameRect",
+          width: 100 as X,
+          height: 100 as Y,
+          style: `rgba(0,255,0,0.3)`,
+          layer: 100 as Natural,
+          collidable: false,
+          movementFactors: { x: 1, y: 1 } as Coord,
+        },
+        coord: firstCrash,
+      } as CoreElem<GameRect>)
+
+      return { elems: ayylems }
+    })
+  }
+
+  // We are pretty sure there is a collision at this point, however:
+  //  1. We still need to check up to THREE chunks, not just one.
+  //  2. We still need to check if we're actually colliding, because this just
+  //     tells us if we're in their chunk space; we could have small elements.
+  //  3. We need to adjust min(X, Y) to equal the _earliest_ colliding element,
+  //     not the latest one (like currently).
+  //
+  // The next step is to do the actual resolution, as well.
+}
+
+type initGame = (props: {
+  context: CanvasRenderingContext2D
+  showMenu: () => void
+}) => void
+export const initGame: initGame = ({ context, showMenu }) => {
   // We don't want image smoothing
   context.imageSmoothingEnabled = false
 
@@ -954,19 +1065,20 @@ export const initGame = (context: CanvasRenderingContext2D) => {
     time: { now: 0 as Milliseconds, previous: 0 as Milliseconds },
     lastFrame: 0 as Milliseconds,
     player: {
-      x: context.canvas.width * 0.5 as X,
-      y: context.canvas.height * 0.5 as Y,
+      x: 0 as X,
+      y: -200 as Y,
       width: 100 as X,
-      height: 200 as Y,
-      velocity: { x: 0, y: 0 } as Coord,
+      height: 100 as Y,
+      velocity: { x: 0 as X, y: 0 as Y } as Coord,
       airborne: true,
     },
-    screen: { x: 0 as X, y: 0 as Y },
+    screen: { x: 0 as X, y: 0 as Y } as Coord,
     settings: defaultSettings,
     activeKeys: {},
     zoom: 1,
     chunks: {},
     effects: State.create({ effects: [] as Effects.Effects }),
+    paused: false,
   })
 
   attachKeyEvents(scopedState)
@@ -977,19 +1089,25 @@ export const initGame = (context: CanvasRenderingContext2D) => {
     const now = _now as Milliseconds
     const state = scopedState.get()
 
+    if (Debug.visuals.get().elems.length > 10) {
+      Debug.visuals.modify(_ => ({ elems: [] }))
+    }
+
+    if (state.settings.keybindings.pause in state.activeKeys) {
+      pausedState.modify(_ => ({ paused: true }))
+      showMenu()
+      return
+    }
+
+    // Generate terrain/map/static tings
     if (Object.keys(state.chunks).length === 0) {
-      state.chunks = runLayers(state, staticLayers)
+      state.chunks = World.renderWorld(state) //runLayers(state, staticLayers)
     }
 
     // Adjust for zoom-level
     state.dimensions = {
       width: state.dimensions.width / state.zoom as X,
       height: state.dimensions.height / state.zoom as Y,
-    }
-    // Center according to zoom
-    state.screen = {
-      x: state.screen.x - (state.dimensions.width / state.zoom * 0.5) + state.dimensions.width * 0.5 as X,
-      y: state.screen.y - (state.dimensions.height / state.zoom * 0.5) + state.dimensions.height * 0.5 as Y,
     }
 
     const delta = diff(now, state.lastFrame)
@@ -1013,11 +1131,12 @@ export const initGame = (context: CanvasRenderingContext2D) => {
       console.log(visibleElements, "visibleElements")
     }
     const collidableElements: GameElements
-      = visibleElements.filter(elem => elem.collidable)
+      = visibleElements.filter(({ texture }) => texture.collidable)
     if (debugOnce) console.log(collidableElements, "collidableElements")
 
     const resolvedPlayer: Partial<Player>
       = collisionResolution(state, collidableElements)
+    collisionResolution2(state)
 
     const player = {
       ...state.player,
@@ -1038,7 +1157,7 @@ export const initGame = (context: CanvasRenderingContext2D) => {
 
       const dateNow: Milliseconds
         = wrap(Date.now())
-      fpsState = fpsState.concat([dateNow]).slice(-1000)
+      fpsState = fpsState.concat([dateNow]).slice(-100)
     }
 
     scopedState.modify(oldState => ({
@@ -1050,29 +1169,53 @@ export const initGame = (context: CanvasRenderingContext2D) => {
       screen: {
         x: diff(player.x, state.dimensions.width * 0.5 as X),
         y: diff(player.y, state.dimensions.height * 0.5 as Y),
-      },
+      } as Coord,
     }))
 
     debugOnce = false
-    window.requestAnimationFrame(renderFrame)
   }
-  window.requestAnimationFrame(renderFrame)
+  loop(0 as Milliseconds, 0 as Milliseconds, renderFrame)
 }
 
-export type Game = () => React.ReactElement
-export const Game: Game = () => {
-  const canvasRef = React.useRef<
-    HTMLCanvasElement | null
-  >(null)
+type loop = (
+  time: Milliseconds,
+  prevWinNow: Milliseconds,
+  f: (now: Milliseconds) => void
+) => void
+const loop: loop = (time, prevWinNow, f) => {
+  window.requestAnimationFrame(windowNow => {
+    const { paused } = pausedState.get()
+    let now: Milliseconds = time
+    // NOTE this will add _some_ extraneous time but it's tiny so it's ok
+    if (!paused) {
+      const delta = windowNow - prevWinNow
+      now = now + delta as Milliseconds
+      f(now)
+    }
+    loop(now, windowNow as Milliseconds, f)
+  })
+}
+
+const pausedState = State.create({ paused: false })
+export type Game = React.FunctionComponent<{
+  paused: boolean
+  showMenu: () => void
+}>
+export const Game: Game = ({ paused, showMenu }) => {
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null)
 
   React.useEffect(() => {
     const context = canvasRef?.current?.getContext("2d")
     if (context != null) {
-      initGame(context)
+      initGame({ context, showMenu })
     } else {
       console.warn("Context not ready", canvasRef)
     }
   }, [canvasRef])
+
+  React.useEffect(() => {
+    pausedState.modify(() => ({ paused }))
+  }, [paused])
 
   return React.createElement("canvas", {
     ref: canvasRef,

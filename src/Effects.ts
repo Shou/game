@@ -2,6 +2,7 @@
 import {
   GameState,
   MutableGameState,
+  Player,
 } from "./Types"
 import * as State from "./ScopedState"
 import {
@@ -72,34 +73,42 @@ export const jumpEffect: Effect = (effectState) => {
     player,
     activeKeys: keys,
     settings: { keybindings: { jump } },
-    time: { now },
+    time: { now, previous, },
   } = effectState
 
-  const delta: Milliseconds = diff(now, keys[jump])
+  // TODO FIXME we should:
+  //  - Return 0 when we've spent the 200ms we get to hold jump
+  //  - Return the difference between now and previous timestamps if previous > keys[jump]
+  //  - Return the difference between now and keys[jump] otherwise
+  const delta: Milliseconds
+    = previous > keys[jump]
+    ? diff(now, previous)
+    : diff(now, keys[jump])
 
-  if (jump in keys && delta < 1000) {
-    const y = (1 - toSeconds(delta)) * -100
-    Debug.debugLines.modify(({ lines }) => {
-      lines[4] = `jump: ${y.toFixed(1)}, now: ${now} - ${keys[jump]}`
+  if (jump in keys && previous < keys[jump] + 200) {
+    const dt = toSeconds(delta)
+    const y = dt * -10000
+    Debug.text.modify(({ lines }) => {
+      lines[4] = `jump: ${y.toFixed(1)}, now: ${now - keys[jump]}`
       return { lines }
     })
 
     return Continue({
       player: Object.assign(player, {
-        width: 100, // * (1 - round(1 - delta) * 0.25),
-        height: 200, // * (1 + round(delta) * 0.25),
+        width: 100, // TODO * (1 - round(1 - dt) * 0.25),
+        height: 100, // TODO * (1 + round(dt) * 0.25),
         velocity: {
           x: player.velocity.x,
           y,
         },
-      }),
+      }) as Player,
     })
   }
 
   return Stop({
     player: Object.assign(player, {
       width: 100,
-      height: 200,
+      height: 100,
     }),
   })
 }

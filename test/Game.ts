@@ -1,37 +1,6 @@
+import { test, assertEqual } from "./assertEqual"
 
-import "jsdom-global/register"
-import { X, Y, Coord, Player, GameState, GameRect } from "../src/Game"
-import * as Game from "../src/Game"
-import { isEqual, range } from "lodash"
-
-interface Test {
-  name: string
-  f: () => Promise<void>
-}
-
-// lol who needs a testing framework when u can NIH
-let tests: Array<Test> = []
-const test: (name: string, f: () => Promise<void>) => void = (name, f) => tests.push({ name, f })
-const runTests: () => void = () => tests.forEach(({ name, f }, i) => {
-  f().catch(e => console.log(`${i + 1}. ${name}\n`, e.toString()))
-})
-
-type assertEqual = <A>(a: {} & A, b: {} & A) => void
-const assertEqual: assertEqual = ((a, b) => {
-  if (!isEqual(a, b)) {
-    type f = (o: any) => string
-    const f: f = o =>
-      "{ " + Object.keys(o).reduce(
-        (acc, k) => {
-          const v = typeof o[k] === "object" ? f(o[k]) : o[k]
-          return acc.concat([`${k}: ${v}`])
-        },
-        [] as Array<string>
-      ).join(", ") + " }"
-    throw new Error(`Objects not equal:\n\tResult: ${f(a)}\n\tWanted: ${f(b)}`)
-  }
-})
-
+import { X, Y, Coord } from "../src/Types"
 
 const context: CanvasRenderingContext2D = {
   canvas: {
@@ -249,5 +218,3 @@ test("Should fall with gravity onto block and stay still", async () => {
   )
 })
 */
-
-runTests()
