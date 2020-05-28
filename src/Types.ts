@@ -1,5 +1,8 @@
 // the sikest file
 
+import {
+  GameChunks,
+} from "./Chunks"
 import { Effects } from "./Effects"
 import {
   Coord,
@@ -12,8 +15,8 @@ import {
 } from "./Math"
 import { ScopedState } from "./ScopedState"
 import {
+  GameTexture,
   Rectangle,
-  GameChunks,
 } from "./Texture"
 
 export namespace Unique {
@@ -65,7 +68,7 @@ export interface Keybindings {
   down: string
   right: string
   jump: string
-  sprint: string
+  crouch: string
   zoom: string
   pause: string
 }
@@ -83,7 +86,7 @@ export const defaultSettings = {
     down: "s",
     right: "d",
     jump: " ",
-    sprint: "Shift",
+    crouch: "Ctrl",
     zoom: "m",
     pause: "p",
   },
@@ -101,20 +104,13 @@ export interface ActiveKeys {
   [key: string]: Milliseconds
 }
 
-// TODO refactor to Entity
-export type Player = {
-  velocity: Coord
-  airborne: boolean
-  x: X
-  y: Y
-} & Rectangle
-
-// TODO
 export type Entity = {
   velocity: Coord
   airborne: boolean
   coord: Coord
-}
+  weight: Natural
+  textures: Array<GameTexture>
+} & Rectangle // what abut round enemies????!!!!
 
 export interface GameState {
   readonly context: CanvasRenderingContext2D
@@ -122,7 +118,7 @@ export interface GameState {
   dimensions: Rectangle
   time: { now: Milliseconds, previous: Milliseconds }
   lastFrame: Milliseconds
-  player: Player
+  player: Entity
   screen: Coord
   settings: Settings
   activeKeys: ActiveKeys

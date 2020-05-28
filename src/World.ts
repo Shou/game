@@ -7,22 +7,25 @@ import {
   insertChunk,
   toChunkCoord,
 } from "./Chunks"
-import * as Colors from "./Colors"
+import * as Color from "./Color"
 import {
   Coord,
   Integer,
   Natural,
   X, Y,
   abs,
+  ceil,
   diff,
   floor,
   fromCantor,
   range,
   round,
+  sqrt,
   toCantor,
 } from "./Math"
 import {
   CoreElem,
+  GameArc,
   GameElement,
   GameElements,
   GameRect,
@@ -42,9 +45,59 @@ import Prando from "prando"
 import { sortBy } from "ramda"
 
 const {
-  min, max,
+  PI, min, max, cos, sin,
 } = Math
 
+
+// TODO cache n patterns/configurations to lessen perf impact
+// TODO corners (and maybe lines?)
+type mkEscher = (coord: Coord, radius: Natural) => Array<CoreElem<GameArc>>
+const mkEscher: mkEscher = (coord, radius) => {
+  const startAngle = floor(Math.random() * 4) * PI * 0.5
+  const endAngle = startAngle + PI * 0.5
+  const antiClockwise = false
+
+  const density = ceil(Math.random() * 4) / 4
+
+  // center of the cone in the opposite direction
+  const oppositeAngle = startAngle + PI * 1.25
+  const corner = {
+    x: coord.x + cos(oppositeAngle) * radius * sqrt(2 as Natural) as X,
+    y: coord.y + sin(oppositeAngle) * radius * sqrt(2 as Natural) as Y,
+  } as Coord
+
+  const style = Color.toString(
+    Color.luminosity(
+      Color.saturation(
+        Color.brown,
+        0.1,
+      ),
+      1.2,
+    )
+  )
+
+  let es: Array<CoreElem<GameArc>> = []
+  for (let i = 1; i >= density; i -= density) {
+    es.push({
+      texture: {
+        type: "GameArc",
+        radius: radius * i as Natural,
+        startAngle,
+        endAngle,
+        antiClockwise,
+        fill: false, // maybe?
+        lineWidth: 1 as Natural,
+        style,
+        collidable: false,
+        movementFactors: { x: 1 as X, y: 1 as Y } as Coord,
+        layer: 33 as Natural,
+      },
+      coord: corner,
+    })
+  }
+
+  return es
+}
 
 type mkCaves = (seed: number, quantity: number) => {
   caves: GameChunks
@@ -87,7 +140,7 @@ const mkCaves: mkCaves = (seed, quantity) => {
     type: "GameRect",
     width: 100 as X,
     height: 100 as Y,
-    style: Colors.toString(Colors.brown),
+    style: Color.toString(Color.brown),
     movementFactors: { x: 1, y: 1 } as Coord,
     collidable: true,
     layer: 32 as Natural,
@@ -101,10 +154,17 @@ const mkCaves: mkCaves = (seed, quantity) => {
           x: ix * 100 as X,
           y: iy * 100 as Y,
         } as Coord
-        caves = insertChunk(caves, toChunkCoord(coord), {
-          texture,
-          coord,
-        })
+
+        const scribbles: Array<CoreElem<GameArc>>
+          = mkEscher(coord, 50 as Natural)
+
+        caves = insertChunk(caves, toChunkCoord(coord), [
+          {
+            texture,
+            coord,
+          },
+          ...scribbles,
+        ])
       }
     }
   }
@@ -154,10 +214,12 @@ const mkGrass: mkGrass = (seed, quantity, start) => {
           x: start + ix * width as X,
           y: iy * height as Y,
         } as Coord
-        grasses = insertChunk(grasses, toChunkCoord(coord), {
-          texture,
-          coord,
-        })
+        grasses = insertChunk(grasses, toChunkCoord(coord), [
+          {
+            texture,
+            coord,
+          },
+        ])
       }
     }
   }
@@ -205,7 +267,7 @@ export const renderWorld: renderWorld = (state) => {
     }
     for (const key in grasses) {
       const coord = fromCantor(parseInt(key) as Natural)
-      cavesMaskedGrass = insertChunk(cavesMaskedGrass, coord, grasses[key][0])
+      cavesMaskedGrass = insertChunk(cavesMaskedGrass, coord, [grasses[key][0]])
     }
 
     world = cavesMaskedGrass

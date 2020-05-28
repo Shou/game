@@ -70,6 +70,7 @@ export type GameArc = {
   endAngle: number
   antiClockwise: boolean
   fill: boolean
+  lineWidth: Natural
 } & CoreTexture & Circle & Style
 
 export type GameTexture

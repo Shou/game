@@ -1,6 +1,7 @@
 import * as Assets from "./Assets"
 import {
   ChunkCoord,
+  GameChunks,
   CHUNK_RATIO,
   toChunkCoord,
 } from "./Chunks"
@@ -37,7 +38,6 @@ import * as State from "./ScopedState"
 import {
   CoreElem,
   GameArc,
-  GameChunks,
   GameElement,
   GameElements,
   GameImage,
@@ -48,8 +48,9 @@ import {
 } from "./Texture"
 import {
   ActiveKeys,
+  Entity,
   GameState,
-  Player,
+  Keybindings,
   UserSettings,
   coerce,
   defaultSettings,
@@ -193,8 +194,10 @@ export const renderGameElement: renderGameElement = (context, gameElement) => {
         endAngle,
         antiClockwise,
         fill,
+        lineWidth,
       }: GameArc = texture
       const { x, y, } = coord
+      context.lineWidth = lineWidth
       context.beginPath()
       context.arc( x, y, radius, startAngle, endAngle, antiClockwise)
       if (fill) {
@@ -318,6 +321,7 @@ export const renderSun: renderSun = (state) => {
       endAngle: 360,
       antiClockwise: false,
       fill: true,
+      lineWidth: 1 as Natural,
       filter: [
         `saturate(${min(100, 110 - brightness(t))}%)`,
         `hue-rotate(${redness(t) * -90}deg)`,
@@ -459,7 +463,7 @@ const previousPlayersState
 export type renderPlayer = (gameState: GameState) => GameElements
 export const renderPlayer: renderPlayer = ({ player }) => {
   const {
-    x, y,
+    coord: { x, y },
     width, height,
     velocity,
   } = player
@@ -584,7 +588,7 @@ export const renderDebug: renderDebug = (state) => {
     texture: {
       type: "GameText",
       font: { size: 30, family: "Open Sans Mono" },
-      text: `Player: ${player.x.toFixed(1)} x ${player.y.toFixed(1)}`,
+      text: `Player: ${player.coord.x.toFixed(1)} x ${player.coord.y.toFixed(1)}`,
       style: "white",
       width: 200 as X,
       height: 30 as Y,
@@ -795,17 +799,65 @@ export const attachKeyEvents: attachKeyEvents = (scopedState) => {
   })
 }
 
-export type movement = (state: GameState) => Player
-export const movement: movement = (state) => {
+// smoke sum types every day
+const Jump: unique symbol = Symbol("Jump")
+const GoLeft: unique symbol = Symbol("GoLeft")
+const GoRight: unique symbol = Symbol("GoRight")
+const ToggleZoom: unique symbol = Symbol("ToggleZoom")
+const Crouch: unique symbol = Symbol("Crouch")
+
+type Jump = typeof Jump
+type GoLeft = typeof GoLeft
+type GoRight = typeof GoRight
+type ToggleZoom = typeof ToggleZoom
+type Crouch = typeof Crouch
+
+type Action
+  = Jump
+  | GoLeft
+  | GoRight
+  | ToggleZoom
+  | Crouch
+
+type handleInput = (bindings: Keybindings, keys: ActiveKeys) => Array<Action>
+export const handleInput: handleInput = (bindings, keys) => {
+  let actions: Array<Action> = []
+
+  if (bindings.jump in keys) {
+    actions.push(Jump)
+  }
+  if (bindings.left in keys) {
+    actions.push(GoLeft)
+  }
+  if (bindings.right in keys) {
+    actions.push(GoRight)
+  }
+  if (bindings.zoom in keys) {
+    actions.push(ToggleZoom)
+  }
+  if (bindings.crouch in keys) {
+    actions.push(Crouch)
+  }
+
+  return actions
+}
+
+// TODO move keyboard input elsewhere lol
+type movement = (entity: Entity, state: GameState) => Entity
+export const movement: movement = (entity, state) => {
   const {
     time: { now, previous },
     lastFrame,
     settings: {
       keybindings: keys,
     },
-    player: { velocity, airborne },
     zoom,
   } = state
+  const {
+    velocity,
+    airborne,
+    coord,
+  } = entity
 
   // Time delta
   const dt: Seconds = toSeconds(diff(now, previous))
@@ -845,7 +897,7 @@ export const movement: movement = (state) => {
     return { lines }
   })
 
-  return Object.assign(state.player, {
+  return Object.assign(entity, {
     velocity: {
       x: moveLeft + moveRight as X,
       y: gravity(velocity.y),
@@ -853,10 +905,11 @@ export const movement: movement = (state) => {
   })
 }
 
+// TODO make this generic to entities rather than player
 type collisionResolution = (
   state: GameState,
   gameElements: Array<GameElement>
-) => Partial<Player>
+) => Partial<Entity>
 export const collisionResolution: collisionResolution = (state, gameElements) => {
   const {
     player: initPlayer,
@@ -866,7 +919,7 @@ export const collisionResolution: collisionResolution = (state, gameElements) =>
     return {}
 
   } else {
-    const movingPlayer: Player = {
+    const movingPlayer: Entity = {
       ...initPlayer,
       // Airborne until proven false by a downward collision
       airborne: true,
@@ -880,8 +933,8 @@ export const collisionResolution: collisionResolution = (state, gameElements) =>
       const [ diffX, diffY ] = [
         // Where is the element in relation to the player?
         // e.g. elem (50, -50) - player (-50, 50) = (100, -100)
-        diff(coord.x, player.x),
-        diff(coord.y, player.y),
+        diff(coord.x, player.coord.x),
+        diff(coord.y, player.coord.y),
       ]
       // XXX why are we dividing by 10 here? should this be removed?
       // Is the player movement in direction of the element?
@@ -896,10 +949,10 @@ export const collisionResolution: collisionResolution = (state, gameElements) =>
       // TODO support round bois
       if (collidingCourse > 0.5 && !("radius" in texture)) {
         // Player edges
-        const rightPlayerX = player.x + player.width * 0.5 + velocity.x as X
-        const leftPlayerX = player.x - player.width * 0.5 + velocity.x as X
-        const downPlayerY = player.y + player.height * 0.5 + velocity.y as Y
-        const upPlayerY = player.y - player.height * 0.5 + velocity.y as Y
+        const rightPlayerX = player.coord.x + player.width * 0.5 + velocity.x as X
+        const leftPlayerX = player.coord.x - player.width * 0.5 + velocity.x as X
+        const downPlayerY = player.coord.y + player.height * 0.5 + velocity.y as Y
+        const upPlayerY = player.coord.y - player.height * 0.5 + velocity.y as Y
 
         // Element edges
         const rightElemX = coord.x + texture.width * 0.5 as X
@@ -948,7 +1001,7 @@ export const collisionResolution: collisionResolution = (state, gameElements) =>
           const airborne = player.airborne && downPlayerY < upElemY
 
           Debug.text.modify(({ lines }) => {
-            lines[2] = `elem: ${coord.x}x${coord.y}, player: ${player.x.toFixed(1)}x${player.y.toFixed(1)}`
+            lines[2] = `elem: ${coord.x}x${coord.y}, player: ${player.coord.x.toFixed(1)}x${player.coord.y.toFixed(1)}`
             return { lines }
           })
 
@@ -965,8 +1018,10 @@ export const collisionResolution: collisionResolution = (state, gameElements) =>
 
     return {
       ...correctedPlayer,
-      x: sum(initPlayer.x, correctedPlayer.velocity.x),
-      y: sum(initPlayer.y, correctedPlayer.velocity.y),
+      coord: {
+        x: sum(initPlayer.coord.x, correctedPlayer.velocity.x),
+        y: sum(initPlayer.coord.y, correctedPlayer.velocity.y),
+      },
     }
   }
 }
@@ -986,12 +1041,12 @@ const collisionResolution2: collisionResolution2 = (state) => {
 
   // X is OK, Y is NOT OK
   // Get the range of chunks from the player to the projected (velocity) position
-  const fromX = player.x * CHUNK_RATIO
-  const toX = (player.x + player.width * 0.5 * sign(velocity.x) + velocity.x) * CHUNK_RATIO
+  const fromX = player.coord.x * CHUNK_RATIO
+  const toX = (player.coord.x + player.width * 0.5 * sign(velocity.x) + velocity.x) * CHUNK_RATIO
   const rx = range(round(fromX), round(toX))
 
-  const fromY = player.y * CHUNK_RATIO
-  const toY = (player.y + player.height * 0.5 * sign(velocity.y) + velocity.y) * CHUNK_RATIO
+  const fromY = player.coord.y * CHUNK_RATIO
+  const toY = (player.coord.y + player.height * 0.5 * sign(velocity.y) + velocity.y) * CHUNK_RATIO
   const ry = range(
     repel(toY, fromY),
     repel(fromY, toY),
@@ -1065,12 +1120,19 @@ export const initGame: initGame = ({ context, showMenu }) => {
     time: { now: 0 as Milliseconds, previous: 0 as Milliseconds },
     lastFrame: 0 as Milliseconds,
     player: {
-      x: 0 as X,
-      y: -200 as Y,
+      coord: {
+        x: 0 as X,
+        y: -200 as Y,
+      } as Coord,
       width: 100 as X,
       height: 100 as Y,
-      velocity: { x: 0 as X, y: 0 as Y } as Coord,
+      velocity: {
+        x: 0 as X,
+        y: 0 as Y
+      } as Coord,
       airborne: true,
+      weight: 50 as Natural,
+      textures: [] as any, // TODO TOOOOODOOOOOO
     },
     screen: { x: 0 as X, y: 0 as Y } as Coord,
     settings: defaultSettings,
@@ -1116,8 +1178,7 @@ export const initGame: initGame = ({ context, showMenu }) => {
     const effectState = Effects.runEffects(state)
     Object.assign(state, effectState)
 
-    let movedPlayer: Player = movement(state)
-    state.player = movedPlayer
+    state.player = movement(state.player, state)
 
     const dynamicElements: GameElements
       = Object.values(runLayers(state, dynamicLayers)).map(Object.values).flat()
@@ -1134,7 +1195,7 @@ export const initGame: initGame = ({ context, showMenu }) => {
       = visibleElements.filter(({ texture }) => texture.collidable)
     if (debugOnce) console.log(collidableElements, "collidableElements")
 
-    const resolvedPlayer: Partial<Player>
+    const resolvedPlayer: Partial<Entity>
       = collisionResolution(state, collidableElements)
     collisionResolution2(state)
 
@@ -1142,8 +1203,8 @@ export const initGame: initGame = ({ context, showMenu }) => {
       ...state.player,
       ...resolvedPlayer,
       // TODO increase these later i guess lol
-      x: (resolvedPlayer.x || state.player.x) % 10000 as X,
-      y: (resolvedPlayer.y || state.player.y) % 10000 as Y,
+      x: (resolvedPlayer?.coord!.x || state.player.coord.x) % 20000 as X,
+      y: (resolvedPlayer?.coord!.y || state.player.coord.y) % 10000 as Y,
     }
 
     if (delta > (1000 / state.settings.fps)) {
@@ -1167,8 +1228,8 @@ export const initGame: initGame = ({ context, showMenu }) => {
       lastFrame: state.lastFrame,
       player,
       screen: {
-        x: diff(player.x, state.dimensions.width * 0.5 as X),
-        y: diff(player.y, state.dimensions.height * 0.5 as Y),
+        x: diff(player.coord.x, state.dimensions.width * 0.5 as X),
+        y: diff(player.coord.y, state.dimensions.height * 0.5 as Y),
       } as Coord,
     }))
 

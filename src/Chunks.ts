@@ -30,19 +30,11 @@ export const toChunkCoord: (c: Coord) => ChunkCoord
 export const fromChunkCoord: (c: ChunkCoord) => Coord
   = (c) => ({ x: c.x * (1 / CHUNK_RATIO), y: c.y * (1 / CHUNK_RATIO) } as any as Coord)
 
-type upsertChunk = (chunks: GameChunks, c: ChunkCoord, elem: GameElement) => GameChunks
-export const upsertChunk: upsertChunk = (chunks, c, elem) => {
+type insertChunk = (chunks: GameChunks, c: ChunkCoord, elems: Array<GameElement>) => GameChunks
+export const insertChunk: insertChunk = (chunks, c, elems) => {
   const nat = toCantor(c)
   return Object.assign(chunks, {
-    [nat]: (chunks?.[nat] || []).concat([ elem ])
-  })
-}
-
-type insertChunk = (chunks: GameChunks, c: ChunkCoord, elem: GameElement) => GameChunks
-export const insertChunk: insertChunk = (chunks, c, elem) => {
-  const nat = toCantor(c)
-  return Object.assign(chunks, {
-    [nat]: [elem]
+    [nat]: elems
   })
 }
 

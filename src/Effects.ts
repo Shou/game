@@ -1,8 +1,8 @@
 
 import {
+  Entity,
   GameState,
   MutableGameState,
-  Player,
 } from "./Types"
 import * as State from "./ScopedState"
 import {
@@ -101,7 +101,7 @@ export const jumpEffect: Effect = (effectState) => {
           x: player.velocity.x,
           y,
         },
-      }) as Player,
+      }) as Entity,
     })
   }
 
