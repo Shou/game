@@ -3,6 +3,7 @@ import {
   Natural,
   X, Y,
 } from "./Math"
+import * as Color from "./Color"
 
 export interface Rectangle {
   width: X
@@ -14,7 +15,7 @@ export interface Circle {
 }
 
 export interface Style {
-  style?: string
+  color: Color.HSLA
 }
 
 export interface CoreTexture {
@@ -72,6 +73,17 @@ export type GameArc = {
   fill: boolean
   lineWidth: Natural
 } & CoreTexture & Circle & Style
+
+export type PathArc = {
+  readonly type: "PathArc"
+  startAngle: number
+  endAngle: number
+  antiClockwise: boolean
+} & Circle & Style
+
+export type PathLine = {
+  readonly type: "GameLine"
+} & Circle & Style
 
 export type GameTexture
   = GameImage

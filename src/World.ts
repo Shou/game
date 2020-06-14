@@ -57,7 +57,7 @@ const mkEscher: mkEscher = (coord, radius) => {
   const endAngle = startAngle + PI * 0.5
   const antiClockwise = false
 
-  const density = ceil(Math.random() * 4) / 4
+  const density = max(0.5, ceil(Math.random() * 4) / 4)
 
   // center of the cone in the opposite direction
   const oppositeAngle = startAngle + PI * 1.25
@@ -66,14 +66,12 @@ const mkEscher: mkEscher = (coord, radius) => {
     y: coord.y + sin(oppositeAngle) * radius * sqrt(2 as Natural) as Y,
   } as Coord
 
-  const style = Color.toString(
-    Color.luminosity(
-      Color.saturation(
-        Color.brown,
-        0.1,
-      ),
-      1.2,
-    )
+  const color = Color.luminosity(
+    Color.saturation(
+      Color.brown,
+      0.1,
+    ),
+    1.2,
   )
 
   let es: Array<CoreElem<GameArc>> = []
@@ -87,7 +85,7 @@ const mkEscher: mkEscher = (coord, radius) => {
         antiClockwise,
         fill: false, // maybe?
         lineWidth: 1 as Natural,
-        style,
+        color,
         collidable: false,
         movementFactors: { x: 1 as X, y: 1 as Y } as Coord,
         layer: 33 as Natural,
@@ -97,6 +95,34 @@ const mkEscher: mkEscher = (coord, radius) => {
   }
 
   return es
+}
+
+type mkGrassLeaf = (coord: Coord, radius: Natural) => CoreElem<GameArc>
+const mkGrassLeaf: mkGrassLeaf = (coord, radius) => {
+  const deg = 1
+  const color = Color.luminosity(Color.green, 1)
+
+  const texture: GameArc = {
+    type: "GameArc",
+    radius: radius,
+    startAngle: PI * 2 - deg,
+    endAngle: PI * 2,
+    antiClockwise: false,
+    fill: false,
+    lineWidth: 2 as Natural,
+    color,
+    collidable: false,
+    movementFactors: { x: 1 as X, y: 1 as Y } as Coord,
+    layer: 33 as Natural,
+  }
+
+  return {
+    texture,
+    coord: {
+      x: coord.x - radius as X,
+      y: coord.y - radius as Y,
+    } as Coord,
+  }
 }
 
 type mkCaves = (seed: number, quantity: number) => {
@@ -140,7 +166,7 @@ const mkCaves: mkCaves = (seed, quantity) => {
     type: "GameRect",
     width: 100 as X,
     height: 100 as Y,
-    style: Color.toString(Color.brown),
+    color: Color.brown,
     movementFactors: { x: 1, y: 1 } as Coord,
     collidable: true,
     layer: 32 as Natural,
@@ -195,7 +221,7 @@ const mkGrass: mkGrass = (seed, quantity, start) => {
     type: "GameRect",
     width,
     height,
-    style: "green",
+    color: Color.green,
     movementFactors: { x: 1, y: 1 } as Coord,
     collidable: true,
     layer: 32 as Natural,
@@ -219,6 +245,7 @@ const mkGrass: mkGrass = (seed, quantity, start) => {
             texture,
             coord,
           },
+          mkGrassLeaf(coord, 50 as Natural)
         ])
       }
     }
@@ -267,7 +294,7 @@ export const renderWorld: renderWorld = (state) => {
     }
     for (const key in grasses) {
       const coord = fromCantor(parseInt(key) as Natural)
-      cavesMaskedGrass = insertChunk(cavesMaskedGrass, coord, [grasses[key][0]])
+      cavesMaskedGrass = insertChunk(cavesMaskedGrass, coord, grasses[key])
     }
 
     world = cavesMaskedGrass

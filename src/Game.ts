@@ -5,6 +5,7 @@ import {
   CHUNK_RATIO,
   toChunkCoord,
 } from "./Chunks"
+import * as Color from "./Color"
 import * as Debug from "./Debug"
 import * as Effects from "./Effects"
 import {
@@ -58,6 +59,7 @@ import {
   wrap,
 } from "./Types"
 import * as World from "./World"
+import * as Renderer from "./Renderer"
 
 import Prando from "prando"
 import { minBy, sortBy } from "ramda"
@@ -109,9 +111,9 @@ export type renderGameElement = (
 export const renderGameElement: renderGameElement = (context, gameElement) => {
   const { texture, coord } = gameElement
 
-  if ("style" in texture && texture.style != null) {
-    context.fillStyle = texture.style
-    context.strokeStyle = texture.style
+  if ("color" in texture && texture.color != null) {
+    context.fillStyle = Color.toString(texture.color)
+    context.strokeStyle = Color.toString(texture.color)
   }
   if ("filter" in texture && texture.filter != null) {
     context.filter = texture.filter
@@ -276,6 +278,7 @@ export const renderSky: renderSky = (state) => {
       collidable: false,
       position: "top-left",
       layer: 12 as Natural,
+      color: Color.black,
     },
     coord: {
       x: Assets.starsImage.width * index as X,
@@ -329,6 +332,7 @@ export const renderSun: renderSun = (state) => {
       movementFactors: { x: 0, y: 0 } as Coord,
       collidable: false,
       layer: 13 as Natural,
+      color: Color.white,
     },
     coord: {
       x, y,
@@ -348,7 +352,7 @@ export const renderSun: renderSun = (state) => {
         collidable: false,
         movementFactors: { x: 0, y: 0 } as Coord,
         layer: 13 as Natural,
-        style: "hsla(50,100%,50%,0.05)",
+        color: Color.HSLA(50,100,50,0.05),
       },
       coord: {
         x, y,
@@ -401,6 +405,7 @@ export const renderClouds: renderClouds = (state) => {
             `opacity(90%)`,
           ].join(" "),
           layer: 14 as Natural,
+          color: Color.transparent,
         },
         coord: {
           x: coord.x * width as X,
@@ -448,6 +453,7 @@ const renderMountains: renderMountains = (state) => {
       collidable: false,
       filter: `brightness(${brightness(t)}%)`,
       layer: 0 as Natural, ////////////////////////////////////////// TODO FIXME
+      color: Color.transparent,
     },
     coord: {
       x: 0 as X,
@@ -474,7 +480,7 @@ export const renderPlayer: renderPlayer = ({ player }) => {
     texture: {
       type: "GameRect",
       width, height,
-      style: `rgba(0,0,0,0.5)`,
+      color: Color.HSLA(0,0,0,0.5),
       collidable: true,
       movementFactors: { x: 1, y: 1 } as Coord,
       layer: 33 as Natural,
@@ -486,7 +492,7 @@ export const renderPlayer: renderPlayer = ({ player }) => {
       type: "GameRect",
       width: width + 10 as X,
       height: height + 10 as Y,
-      style: `rgba(255,255,255,0.5)`,
+      color: Color.HSLA(0,100,100,0.5),
       collidable: false,
       movementFactors: { x: 1, y: 1 } as Coord,
       layer: 33 as Natural,
@@ -504,7 +510,7 @@ export const renderPlayer: renderPlayer = ({ player }) => {
         type: "GameRect",
         width: width as X,
         height: height as Y,
-        style: `rgba(240,0,50,${0.6 / (i + 1)})`,
+        color: Color.HSLA(348,100,47,0.6 / (i + 1)),
         collidable: false,
         movementFactors: { x: 1, y: 1 } as Coord,
         layer: 33 as Natural,
@@ -549,7 +555,7 @@ export const renderDebug: renderDebug = (state) => {
   const fpsText: CoreElem<GameText> = {
     texture: {
       type: "GameText",
-      style: "white",
+      color: Color.white,
       font: { size: 30, family: "Open Sans Mono" },
       text: `${fps.toFixed(1)} fps`,
       width: 200 as X,
@@ -570,7 +576,7 @@ export const renderDebug: renderDebug = (state) => {
       type: "GameText",
       font: { size: 30, family: "Open Sans Mono" },
       text: `Time: ${(t * 24).toFixed(1)}h;`,
-      style: "white",
+      color: Color.white,
       width: 200 as X,
       height: 30 as Y,
       movementFactors: { x: 0, y: 0 } as Coord,
@@ -589,7 +595,7 @@ export const renderDebug: renderDebug = (state) => {
       type: "GameText",
       font: { size: 30, family: "Open Sans Mono" },
       text: `Player: ${player.coord.x.toFixed(1)} x ${player.coord.y.toFixed(1)}`,
-      style: "white",
+      color: Color.white,
       width: 200 as X,
       height: 30 as Y,
       movementFactors: { x: 0, y: 0 } as Coord,
@@ -608,7 +614,7 @@ export const renderDebug: renderDebug = (state) => {
       type: "GameText",
       font: { size: 30, family: "Open Sans Mono" },
       text: `Screen: ${screen.x.toFixed(1)} x ${screen.y.toFixed(1)}`,
-      style: "white",
+      color: Color.white,
       width: 200 as X,
       height: 30 as Y,
       movementFactors: { x: 0, y: 0 } as Coord,
@@ -630,7 +636,7 @@ export const renderDebug: renderDebug = (state) => {
             type: "GameText",
             font: { size: 30, family: "Open Sans Mono" },
             text,
-            style: "white",
+            color: Color.white,
             width: dimensions.width as X,
             height: 30 as Y,
             movementFactors: { x: 0, y: 0 } as Coord,
@@ -674,6 +680,7 @@ export const renderDebug: renderDebug = (state) => {
         collidable: false,
         position: "top-left",
         layer: 101 as Natural,
+        color: Color.white,
       },
       coord: {
         x: 100 as X,
@@ -966,7 +973,7 @@ export const collisionResolution: collisionResolution = (state, gameElements) =>
         //Debug.visuals.modify(({ elems }) => {
         //  elems.push({
         //    ...elem,
-        //    style: `rgba(255,255,255,0.3)`,
+        //    color: Color.HSLA(0,0,100,0.3),
         //  } as any)
 
         //  return { elems }
@@ -1073,7 +1080,7 @@ const collisionResolution2: collisionResolution2 = (state) => {
           type: "GameRect",
           width: 100 as X,
           height: 100 as Y,
-          style: `rgba(0,255,0,0.3)`,
+          color: Color.HSLA(120, 100, 50, 0.3),
           layer: 100 as Natural,
           collidable: false,
           movementFactors: { x: 1, y: 1 } as Coord,
@@ -1257,7 +1264,7 @@ const loop: loop = (time, prevWinNow, f) => {
   })
 }
 
-const pausedState = State.create({ paused: false })
+const pausedState = State.create({ paused: true })
 export type Game = React.FunctionComponent<{
   paused: boolean
   showMenu: () => void
@@ -1266,9 +1273,13 @@ export const Game: Game = ({ paused, showMenu }) => {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null)
 
   React.useEffect(() => {
-    const context = canvasRef?.current?.getContext("2d")
-    if (context != null) {
-      initGame({ context, showMenu })
+    if (canvasRef.current != null) {
+      //const context = canvasRef?.current?.getContext("2d") as CanvasRenderingContext2D
+      //initGame({ context, showMenu })
+      Renderer.main(
+        canvasRef.current as HTMLCanvasElement,
+        pausedState,
+      )
     } else {
       console.warn("Context not ready", canvasRef)
     }
