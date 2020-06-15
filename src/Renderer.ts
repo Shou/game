@@ -113,10 +113,19 @@ const collide: collide = (entity, collidables) => {
       const cmx = shape.left + crx * 0.5
       const cmy = shape.top + cry * 0.5
 
+      // FIXME FIXME FIXME
+      // This is wrong because it's relative to the element's centre, when it
+      // should be along the velocity vector instead and we should see where
+      // the velocity vector line intersects with the element. We _should_ be
+      // able to use the velocity vector angle to figure out which side we're
+      // intersecting with and from that we know the x or y coordinate and can
+      // derive the associated x/y coordinate using the angle.
       const ccrx = clamp(-cx * crx, cos(aTo) * crx, cx * crx) + cmx
       const ccry = clamp(-cy * cry, sin(aTo) * cry, cy * cry) + cmy
 
       const [ diffX, diffY ] = [ ccrx - ecrx, ccry - ecry ]
+
+      const slideX = v.x + diffX + v.y + diffX
 
       debug(block => {
         block.x = s.left + v.x
@@ -125,8 +134,10 @@ const collide: collide = (entity, collidables) => {
         block.height = s.height
       })
 
+      // TODO we shouldn't use "move" here, we should change the velocity such
+      // that we don't penetrate the element
       entity.velocity.y = min(0, v.y) as Y
-      move(entity, s.x + diffX, s.y + diffY)
+      move(entity, s.x + slideX, s.y + diffY)
       entity.airborne = false
     } else {
       entity.airborne = true
@@ -207,6 +218,11 @@ export const main: main = (view, pausedState) => {
   structures.push(platformBlock)
   app.stage.addChild(platformBlock.graphics)
 
+  const wallShape = new Pixi.Rectangle(64 * 8, 64 * 2, 64, 64 * 4)
+  const wallBlock: Elem = mkElem(wallShape, 0xAFAAAA)
+  structures.push(wallBlock)
+  app.stage.addChild(wallBlock.graphics)
+
   const balloonShape: Shape = new Pixi.Circle(64 * 11, 64 * 7, 64)
   const balloonElem: Elem = mkElem(balloonShape, 0xAA1111)
   structures.push(balloonElem)
@@ -218,6 +234,8 @@ export const main: main = (view, pausedState) => {
   entities.push(player)
   app.stage.addChild(player.graphics)
 
+  app.ticker.autoStart = false
+
   // NOTE We can use app.ticker.start/stop() for pausing
   app.ticker.add((lagDelta: number) => {
     for (const entity of entities) {
@@ -226,5 +244,14 @@ export const main: main = (view, pausedState) => {
       movement(entity)
     }
   })
-  app.ticker.autoStart = !pausedState.get().paused
+
+  // TODO polling is bad and we should use listeners
+  setInterval(() => {
+    const { paused } = pausedState.get()
+    if (!paused && !app.ticker.started) {
+      app.ticker.start()
+    } else if(paused && app.ticker.started) {
+      app.ticker.stop()
+    }
+  }, 100)
 }
