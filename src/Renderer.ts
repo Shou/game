@@ -1,5 +1,6 @@
 import * as Pixi from "pixi.js"
 //import * as Color from "./Color"
+import * as Shader from "./Shader"
 import {
   Coord,
   X, Y,
@@ -10,6 +11,7 @@ const {
   atan2, sqrt, sin, cos,
   min, max,
   round, floor, ceil,
+  sign,
 } = Math
 
 type clamp = (a: number, n: number, b: number) => number
@@ -33,14 +35,8 @@ interface Entity extends Elem {
 type mkElem = (shape: Shape, color: number) => Elem
 const mkElem: mkElem = (shape, color) => {
   const graphics: any = new Pixi.Graphics()
-  graphics.x = shape.x
-  graphics.y = shape.y
   graphics.beginFill(color, 1)
-  if ("radius" in shape) {
-    graphics.drawCircle(0, 0, shape.radius)
-  } else {
-    graphics.drawRect(0, 0, shape.width, shape.height)
-  }
+  graphics.drawShape(shape)
   graphics.endFill()
 
   return {
@@ -58,8 +54,21 @@ const mkEntity: mkEntity = (shape, color) => {
   }
 }
 
+type getRectVertices = (rect: any, w: number, h: number) => [number, number, number, number]
+const getRectVertices: getRectVertices = (rect, w, h) => {
+  return [
+    rect.left / w,
+    rect.top / h,
+    rect.right / w,
+    rect.bottom / h,
+  ]
+}
+
 type accelerate = (entity: Entity) => void
 const accelerate: accelerate = (entity) => {
+  const {
+    velocity: v
+  } = entity
   const gravity = 8
   const walk = 12
   const jump = 64
@@ -72,14 +81,67 @@ const accelerate: accelerate = (entity) => {
     console.log(activeKeys, "activeKeys")
 
   if ("d" in activeKeys) {
-    entity.velocity.x = min(walk, entity.velocity.x + walk) as X
-  } else if ("a" in activeKeys) {
-    entity.velocity.x = max(-walk, entity.velocity.x - walk) as X
-  } else if (" " in activeKeys && !entity.airborne) {
-    entity.velocity.y = -jump as Y
-  } else {
-    entity.velocity.x = 0 as X
+    entity.velocity.x = v.x > walk ? v.x : walk as X
   }
+  if ("a" in activeKeys) {
+    entity.velocity.x = v.x < -walk ? v.x : -walk as X
+  }
+  if (" " in activeKeys && !entity.airborne) {
+    entity.velocity.y = v.y < -jump ? v.y : -jump as Y
+  }
+}
+
+type closestVertexToAngle = (cs: Array<Coord>, a: number) => null | Coord
+const closestVertexToAngle: closestVertexToAngle = (cs, a) => {
+  let acc = null
+  let smallest = PI
+
+  for (const c of cs) {
+    const d = Math.abs(Math.atan2(c.y, c.x) - a)
+    if (d < smallest) {
+      smallest = d
+      acc = c
+    }
+  }
+
+  return acc
+}
+
+type rectAngleVertex = (rect: any, angle: number) => null | Coord
+const rectAngleVertex: rectAngleVertex = (rect, angle) => {
+  return closestVertexToAngle([
+    { x: rect.left, y: rect.top },
+    { x: rect.right, y: rect.top },
+    { x: rect.right, y: rect.bottom },
+    { x: rect.left, y: rect.bottom },
+  ] as Array<Coord>, angle)
+}
+
+type angleFromTo = (ax: number, ay: number, bx: number, by: number) => number
+const angleFromTo: angleFromTo = (ax, ay, bx, by) => {
+  return atan2(by - ay, bx - ax)
+}
+
+type gjkSupport = (shape: any, d: any) => any
+const gjkSupport: gjkSupport = (shape, d) => {
+}
+
+//const gjk = (p, q, a) => null
+
+type lineIntersect = <C extends Coord>(Axy0: C, Axy1: C, Bxy0: C, Bxy1: C) => null | Coord
+const lineIntersect: lineIntersect = (Axy0, Axy1, Bxy0, Bxy1) => {
+  const denom = (Axy0.x - Axy1.x) * (Bxy0.y - Bxy1.y) - (Axy0.y - Axy1.y)*(Bxy0.x - Bxy1.x)
+
+  if (denom !== 0) {
+    const detA = Axy0.x * Axy1.y - Axy0.y * Axy1.x
+    const detB = Bxy0.x * Bxy1.y - Bxy0.y * Bxy1.x
+    return {
+      x: (detA * (Bxy0.x - Bxy1.x) - (Axy0.x - Axy1.x) * detB) / denom,
+      y: (detA * (Bxy0.y - Bxy1.y) - (Axy0.y - Axy1.y) * detB) / denom,
+    } as Coord
+  }
+
+  return null
 }
 
 type collide = <B extends Elem>(entity: Entity, collidables: Array<B>) => void
@@ -93,17 +155,21 @@ const collide: collide = (entity, collidables) => {
   const [ rx, ry ] = [s.width * 0.5, s.height * 0.5]
   const [ mx, my ] = [s.left + rx, s.top + ry]
 
+  const [aivx, aivy] = [cos(v.x * -1), sin(v.y * -1)]
+
   const aFrom = atan2(v.y, v.x)
   const aTo = atan2(v.y * -1, v.x * -1)
 
   for (const { shape } of collidables) {
-    const isContained
-      = shape.contains(s.left + v.x, s.bottom + v.y)
-      || shape.contains(s.right + v.x, s.bottom + v.y)
-      || shape.contains(s.left + v.x, s.top + v.y)
-      || shape.contains(s.right + v.x, s.top + v.y)
+    const containment = [
+      shape.contains(s.left + v.x, s.top + v.y),
+      shape.contains(s.right + v.x, s.top + v.y),
+      shape.contains(s.right + v.x, s.bottom + v.y),
+      shape.contains(s.left + v.x, s.bottom + v.y),
+    ]
 
-    if (isContained) {
+    // XXX remove always false predicate
+    if (containment.some(id => id)) {
       const ecrx = clamp(-cx * rx, cos(aFrom) * rx, cx * rx) + mx
       const ecry = clamp(-cy * ry, sin(aFrom) * ry, cy * ry) + my
 
@@ -113,6 +179,16 @@ const collide: collide = (entity, collidables) => {
       const cmx = shape.left + crx * 0.5
       const cmy = shape.top + cry * 0.5
 
+      const A0 = angleFromTo(mx, my, shape.x, shape.y)
+      const At = angleFromTo(mx + v.x, my + v.y, shape.x, shape.y)
+      const V0 = rectAngleVertex(s, A0)
+      const Vt = closestVertexToAngle([
+        { x: s.left + v.x, y: s.top + v.y },
+        { x: s.right + v.x, y: s.top + v.y },
+        { x: s.right + v.x, y: s.bottom + v.y },
+        { x: s.left + v.x, y: s.bottom + v.y },
+      ] as Array<Coord>, At)
+
       // FIXME FIXME FIXME
       // This is wrong because it's relative to the element's centre, when it
       // should be along the velocity vector instead and we should see where
@@ -120,6 +196,9 @@ const collide: collide = (entity, collidables) => {
       // able to use the velocity vector angle to figure out which side we're
       // intersecting with and from that we know the x or y coordinate and can
       // derive the associated x/y coordinate using the angle.
+      //
+      // We also have to account for small entities and small collidables.
+      // Right now the angle will miss a collidable that's smaller.
       const ccrx = clamp(-cx * crx, cos(aTo) * crx, cx * crx) + cmx
       const ccry = clamp(-cy * cry, sin(aTo) * cry, cy * cry) + cmy
 
@@ -155,11 +234,18 @@ const move: move = (entity, x, y) => {
 
 type movement = (entity: Entity) => void
 const movement: movement = (entity) => {
+  const {
+    velocity: v
+  } = entity
+
   move(
     entity,
-    entity.graphics.x + entity.velocity.x,
-    entity.graphics.y + entity.velocity.y,
+    entity.graphics.x + v.x,
+    entity.graphics.y + v.y,
   )
+
+  entity.velocity.x = round(v.x * 0.5 - 0.5 * sign(v.x)) as X
+  entity.velocity.y = round(v.y * 0.5 - 0.5 * sign(v.x)) as Y
 }
 
 // yeah son, global state 😎
@@ -200,6 +286,11 @@ export const main: main = (view, pausedState) => {
 
   keybindings()
 
+  const uniforms = {
+      rects: [] as Array<number>,
+      lights: [] as Array<number>,
+  }
+
   const debugBlock = mkElem(new Pixi.Rectangle(0, 0, 100, 100), 0xFF0000)
   debugBlock.graphics.alpha = 0.5
   debug = f => f(debugBlock.graphics)
@@ -208,31 +299,81 @@ export const main: main = (view, pausedState) => {
   const structures: Array<Elem> = []
   const entities: Array<Entity> = []
 
+  const bgShape = new Pixi.Rectangle(0, 0, app.view.width, app.view.height)
+  const bgBlock: Elem = mkElem(bgShape, 0x8C8888)
+  app.stage.addChild(bgBlock.graphics)
+
   const floorShape = new Pixi.Rectangle(0, app.view.height - 64, app.view.width, 64)
-  const floorBlock: Elem = mkElem(floorShape, 0x33AA44)
+  const floorBlock: Elem = mkElem(floorShape, 0xAFAAAA)
   structures.push(floorBlock)
   app.stage.addChild(floorBlock.graphics)
+  uniforms.rects = [
+    ...uniforms.rects,
+    ...getRectVertices(floorShape, app.view.width, app.view.height),
+  ]
 
   const platformShape = new Pixi.Rectangle(64 * 2, 64 * 8, 64 * 7, 64)
   const platformBlock: Elem = mkElem(platformShape, 0xAFAAAA)
   structures.push(platformBlock)
   app.stage.addChild(platformBlock.graphics)
+  uniforms.rects = [
+    ...uniforms.rects,
+    ...getRectVertices(platformShape, app.view.width, app.view.height)
+  ]
 
   const wallShape = new Pixi.Rectangle(64 * 8, 64 * 2, 64, 64 * 4)
   const wallBlock: Elem = mkElem(wallShape, 0xAFAAAA)
   structures.push(wallBlock)
   app.stage.addChild(wallBlock.graphics)
+  uniforms.rects = [
+    ...uniforms.rects,
+    ...getRectVertices(wallShape, app.view.width, app.view.height)
+  ]
 
   const balloonShape: Shape = new Pixi.Circle(64 * 11, 64 * 7, 64)
   const balloonElem: Elem = mkElem(balloonShape, 0xAA1111)
   structures.push(balloonElem)
   app.stage.addChild(balloonElem.graphics)
 
+  const lightShape: Shape = new Pixi.Circle(app.view.width * 0.5, 48, 32)
+  const lightElem: Elem = mkElem(lightShape, 0xFFFFFF)
+  structures.push(lightElem)
+  app.stage.addChild(lightElem.graphics)
+  uniforms.lights = [
+    ...uniforms.lights,
+    lightShape.x / app.view.width,
+    lightShape.y / app.view.height,
+  ]
+
+  const lampShape: Shape = new Pixi.Circle(app.view.width - 48, app.view.height * 0.5, 32)
+  const lampElem: Elem = mkElem(lampShape, 0xFFFFFF)
+  structures.push(lampElem)
+  app.stage.addChild(lampElem.graphics)
+  uniforms.lights = [
+    ...uniforms.lights,
+    lampShape.x / app.view.width,
+    lampShape.y / app.view.height,
+  ]
+
   const playerShape
     = new Pixi.Rectangle(app.view.width * 0.5, app.view.height * 0.5, 64, 64)
   const player = mkEntity(playerShape, 0xEFE8E8)
   entities.push(player)
   app.stage.addChild(player.graphics)
+  const playerUniformIndex: number = uniforms.rects.length
+  uniforms.rects = [
+    ...uniforms.rects,
+    ...getRectVertices(playerShape, app.view.width, app.view.height)
+  ]
+
+  const vertexLight = Shader.vertexLight()
+  const fragmentLight = Shader.fragmentLight(
+    round(uniforms.rects.length * 0.25),
+    round(uniforms.lights.length * 0.5),
+  )
+  console.log(fragmentLight, "fragmentLight")
+  const shader = new Pixi.Filter(vertexLight, fragmentLight, uniforms) as any
+  app.stage.filters = [shader]
 
   app.ticker.autoStart = false
 
@@ -242,6 +383,11 @@ export const main: main = (view, pausedState) => {
       accelerate(entity)
       collide(entity, structures)
       movement(entity)
+
+      const vsPlayer = getRectVertices(playerShape, app.view.width, app.view.height)
+      for (let i = 0; i < 4; i++) {
+        uniforms.rects[playerUniformIndex + i] = vsPlayer[i]
+      }
     }
   })
 
