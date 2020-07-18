@@ -96,9 +96,20 @@ const mkLight: mkLight = (app, shape, color, uniform) => {
   const index = uniform.length
   const elem = mkElem(app, shape, color)
 
-  uniform[index] = elem.shape.x / app.view.width
+  // Position
+  uniform[index + 0] = elem.shape.x / app.view.width
   uniform[index + 1] = elem.shape.y / app.view.height
-  uniform[index + 2] = shape.radius
+  uniform[index + 2] = 0
+  // Shape
+  uniform[index + 3] = shape.radius / app.view.width
+  uniform[index + 4] = shape.radius / app.view.height
+  // Light strength / distance traveled
+  uniform[index + 5] = 0.1
+  // Color
+  uniform[index + 6] = (color >> 16) / 255
+  uniform[index + 7] = (color >> 8 & 0xFF) / 255
+  uniform[index + 8] = (color & 0xFF) / 255
+  // Maybe we can use this to define the shape... rectangle = 1, oval = 0?
 
   return {
     ...elem,
@@ -415,13 +426,13 @@ export const main: main = (view, pausedState) => {
 
   const playerShape
     = new Pixi.Rectangle(app.view.width * 0.5, app.view.height * 0.5, 64, 64)
-  const player = mkEntity(app, playerShape, 0xEFE8E8, uniforms.rects)
+  const player = mkEntity(app, playerShape, 0xAFAAAA, uniforms.rects)
   entities.push(player)
 
   const vertexLight = Shader.vertexLight()
   const fragmentLight = Shader.fragmentLight(
     round(uniforms.rects.length * 0.25),
-    round(uniforms.lights.length * 0.5),
+    round(uniforms.lights.length / 3 / 3),
   )
   console.log(fragmentLight, "fragmentLight")
   const shader = new Pixi.Filter(vertexLight, fragmentLight, uniforms) as any
@@ -444,13 +455,13 @@ export const main: main = (view, pausedState) => {
       }
 
       move(lamp, 12 * 64 + cos(time * 0.001) * 128, 256 + sin(time * 0.001) * 128)
-      setUniform(uniforms, "lights", 3, [
+      setUniform(uniforms, "lights", 9, [
         lamp.shape.x / app.view.width,
         lamp.shape.y / app.view.height,
       ])
 
       move(floorLight, app.view.width * 0.5 + cos(time * 0.001) * 8 * 64, floorLight.shape.y)
-      setUniform(uniforms, "lights", 6, [
+      setUniform(uniforms, "lights", 18, [
         floorLight.shape.x / app.view.width,
         floorLight.shape.y / app.view.height,
       ])

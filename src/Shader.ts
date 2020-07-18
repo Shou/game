@@ -30,7 +30,7 @@ varying vec2 vTextureCoord;
 
 // left X, top Y, right X, bottom Y
 uniform vec4 rects[${rects}];
-uniform vec2 lights[${lights}];
+uniform mat3 lights[${lights}];
 uniform sampler2D uSampler;
 
 vec2 lineIntersect(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
@@ -126,14 +126,24 @@ bool rectContains(vec4 rect, vec2 point) {
 }
 
 // TODO Glass: reflect and refract
-float castLightRay(vec2 origin, vec2 point) {
+vec3 castLightRay(mat3 origin, vec2 point) {
   const int rectQuantity = ${rects};
   const int maxDepth = 2;
 
-  float angle = angleFromTo(origin, point);
-  vec2 stateOrigin = origin;
+  float radiusX = origin[1].x;
+  float radiusY = origin[1].y;
+  float angle = angleFromTo(origin[0].xy, point);
+  vec2 stateOrigin = origin[0].xy + vec2(cos(angle) * radiusX, sin(angle) * radiusY);
   vec2 statePoint = point;
-  float stateColor;
+
+  float lightIntensity = origin[1].z;
+  vec3 lightColor = origin[2];
+
+  // TODO wtf this dont work??? (forcibly false for now)
+  if (diagonalLength(stateOrigin - statePoint) < min(radiusX, radiusY) * 0.02 && false) {
+    // We be inside the light son
+    return lightColor * lightIntensity;
+  }
 
   for (int depth = 0; depth < maxDepth; depth++) {
     vec4 rect = vec4(-1.0);
@@ -160,7 +170,8 @@ float castLightRay(vec2 origin, vec2 point) {
 
     // Didn't hit anything lol
     if (rect.x == -1.0) {
-      return 1.0 - diagonalLength(stateOrigin - statePoint);
+      float strength = max(0.0, lightIntensity - diagonalLength(stateOrigin - statePoint));
+      return strength * lightColor;
     }
 
     bool isInsideRect = rectContains(rect, statePoint);
@@ -173,13 +184,16 @@ float castLightRay(vec2 origin, vec2 point) {
       continue;
     }
 
-    float strength = 1.0 - diagonalLength(stateOrigin - interPoint);
+    float strength = max(
+      0.0,
+      lightIntensity - diagonalLength(stateOrigin - interPoint)
+    );
 
     if (isInsideRect) {
-      return strength;
+      return strength * lightColor;
     }
 
-    return 0.0;
+    return vec3(0.0);
 
     vec2 start = vec2(interPoint.x + cos(angle) * 0.001, interPoint.y + sin(angle) * 0.001);
     vec2 end = vec2(cos(angle) * 2.0, sin(angle) * 2.0);
@@ -192,15 +206,27 @@ float castLightRay(vec2 origin, vec2 point) {
       vec3 inter = lineRectIntersection(angle, start, end, rects[i]);
 
       if (inter.x != -1.0) {
-        return 0.0;
+        return vec3(0.0);
       }
     }
 
     // Point is illuminated
-    return strength;
+    return strength * lightColor;
   }
 
-  return stateColor;
+  // Should never happen
+  return vec3(0.0);
+}
+
+// https://en.wikipedia.org/wiki/Blend_modes#Screen
+vec3 blendScreen(vec3 colorA, vec3 colorB) {
+  return 1.0 - (1.0 - colorA) * (1.0 - colorB);
+}
+
+// https://en.wikipedia.org/wiki/Blend_modes#Soft_Light
+// This is the Pegtop variant
+vec3 blendSoftLight(vec3 colorA, vec3 colorB) {
+  return (1.0 - 2.0 * colorB) * colorA * colorA + 2.0 * colorB * colorA;
 }
 
 void main() {
@@ -209,122 +235,22 @@ void main() {
   const int rectQuantity = ${rects};
   const int lightQuantity = ${lights};
 
-  vec4 color = vec4(gl_FragColor.xyz * 0.1, gl_FragColor.w);
+  vec4 darkness = vec4(gl_FragColor.xyz * 0.3, gl_FragColor.w);
+  vec4 color = gl_FragColor;
 
+  bool lit = false;
   for (int i = 0; i < lightQuantity; i++) {
-    float brightness = castLightRay(lights[i], vTextureCoord);
-    color = max(color, gl_FragColor * brightness);
+    vec3 lightColor = castLightRay(lights[i], vTextureCoord);
+    if (lightColor != vec3(0.0)) {
+      lit = true;
+      color = vec4(blendScreen(color.xyz, lightColor), color.w);
+    }
   }
 
-  gl_FragColor = color;
-}
-
-// This is way more efficient but totally like less cool bro
-void notMain() {
-  gl_FragColor = texture2D(uSampler, vTextureCoord);
-
-  const int rectQuantity = ${rects};
-  const int lightQuantity = ${lights};
-
-  vec4 darkness = vec4(gl_FragColor.xyz * 0.1, gl_FragColor.w);
-  vec4 color = darkness;
-
-  for (int i = 0; i < rectQuantity; i++) {
-    vec4 subColor = darkness;
-    bool anyShaded = false;
-    bool allShaded = true;
-
-    for (int j = 0; j < lightQuantity; j++) {
-      vec2 c = vTextureCoord - lights[j];
-      float coordDistFromLight = diagonalLength(c);
-
-      float angleToRect = angleFromTo(lights[j], (rects[i].xy + rects[i].zw) * 0.5);
-      vec2 corner = closestVertexToAngle(rects[i], angleToRect);
-
-      float coordDistFromCorner = diagonalLength(corner - vTextureCoord.xy);
-      if (coordDistFromCorner < 0.01) {
-        subColor.g *= 1.5;
-      }
-
-      // So we now know the corner at which we can begin to shave off shadow.
-      // However, a problem persists, with two branches:
-      //  * How do we know if we're restricting shadow to below or above?
-      //  * Same as above, but with left or right.
-      //
-      // if sin(-ca) < 0 then vTextureCoord.y > corner.y else vTextureCoord.y < corner.y
-      // if cos(-ca) < 0 then vTextureCoord.x > corner.x else vTextureCoord.x < corner.x
-      //
-      // Above is out-of-date, "ca" is a bad angle do not use: use angleToRect
-
-      bool isFacingRay;
-      if (sin(angleToRect) > 0.0) {
-        isFacingRay = vTextureCoord.y <= corner.y;
-      } else {
-        isFacingRay = vTextureCoord.y > corner.y;
-      }
-      if (cos(angleToRect) > 0.0) {
-        isFacingRay = isFacingRay && vTextureCoord.x <= corner.x;
-      } else {
-        isFacingRay = isFacingRay && vTextureCoord.x > corner.x;
-      }
-
-      vec2 middle = (rects[i].zw + rects[i].xy) * 0.5;
-      float cornerDistFromLight = diagonalLength(middle - lights[j]);
-      bool isCoordInsideLightRadius = coordDistFromLight <= cornerDistFromLight;
-
-      bool isInside = rects[i].x < vTextureCoord.x && rects[i].z > vTextureCoord.x && rects[i].y < vTextureCoord.y && rects[i].w > vTextureCoord.y;
-      if (!isInside) {
-        vec4 p = rects[i] - vec4(lights[j].x, lights[j].y, lights[j].x, lights[j].y);
-
-        float apyx = atan(p.y, p.x);
-        float apyz = atan(p.y, p.z);
-        float apwz = atan(p.w, p.z);
-        float apwx = atan(p.w, p.x);
-
-        // There has to be a better way lol
-        vec2 tas = vec2(apyx, apyz);
-        vec2 bas = vec2(apwx, apwz);
-        vec2 ras = vec2(apyx, apwx);
-        vec2 las = vec2(apyz, apwz);
-
-        float ma = (tas.x + tas.y + bas.x + bas.y) * 0.25;
-
-        float ca = atan(c.y, c.x);
-        bool insideCone
-          = bas.x > ca && ca > bas.y
-          || tas.x > ca && ca > tas.y
-          || ras.x > ca && ca > ras.y
-          || las.x > ca && ca > las.y;
-
-        if (isCoordInsideLightRadius && insideCone) {
-        } else if (insideCone) {
-          anyShaded = true || anyShaded;
-        } else {
-          allShaded = false && allShaded;
-        }
-
-      } else if (isInside) {
-        float l = rects[i].w - rects[i].y;
-        float d = vTextureCoord.y - rects[i].y;
-        //subLight = 1.0 - r * (d / l);
-      }
-    }
-
-    if (anyShaded && allShaded) {
-      subColor = gl_FragColor * 0.5;
-    } else {
-      subColor += gl_FragColor - 0.001;
-    }
-
-    color = subColor;
-  }
-
-  gl_FragColor = color;
-
-  for (int i = 0; i < lightQuantity; i++) {
-    float r = diagonalLength(vTextureCoord - lights[i]);
-    float antiBandingMagic = cos(vTextureCoord.x * 3141.0) * sin(vTextureCoord.y * 3141.0) * 0.005;
-    gl_FragColor *= 1.0 - r * 0.5 + antiBandingMagic;
+  if (lit) {
+    gl_FragColor = color;
+  } else {
+    gl_FragColor = darkness;
   }
 }
 `
