@@ -170,7 +170,7 @@ vec3 castLightRay(mat3 origin, vec2 point) {
 
     // Didn't hit anything lol
     if (rect.x == -1.0) {
-      float strength = max(0.0, lightIntensity - diagonalLength(stateOrigin - statePoint));
+      float strength = max(0.0, 1.0 - diagonalLength(stateOrigin - statePoint) / lightIntensity);
       return strength * lightColor;
     }
 
@@ -186,7 +186,7 @@ vec3 castLightRay(mat3 origin, vec2 point) {
 
     float strength = max(
       0.0,
-      lightIntensity - diagonalLength(stateOrigin - interPoint)
+      1.0 - diagonalLength(stateOrigin - interPoint) / lightIntensity
     );
 
     if (isInsideRect) {
