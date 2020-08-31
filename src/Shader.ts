@@ -170,7 +170,8 @@ vec3 castLightRay(mat3 origin, vec2 point) {
 
     // Didn't hit anything lol
     if (rect.x == -1.0) {
-      float strength = max(0.0, 1.0 - diagonalLength(stateOrigin - statePoint) / lightIntensity);
+      float distance = diagonalLength(stateOrigin - statePoint) / lightIntensity;
+      float strength = max(0.0, pow(0.368, distance));
       return strength * lightColor;
     }
 
@@ -184,10 +185,8 @@ vec3 castLightRay(mat3 origin, vec2 point) {
       continue;
     }
 
-    float strength = max(
-      0.0,
-      1.0 - diagonalLength(stateOrigin - interPoint) / lightIntensity
-    );
+    float distance = diagonalLength(stateOrigin - interPoint) / lightIntensity;
+    float strength = max(0.0, pow(0.368, distance));
 
     if (isInsideRect) {
       return strength * lightColor;
@@ -243,7 +242,8 @@ void main() {
     vec3 lightColor = castLightRay(lights[i], vTextureCoord);
     if (lightColor != vec3(0.0)) {
       lit = true;
-      color = vec4(blendScreen(color.xyz, lightColor), color.w);
+      color = gl_FragColor;
+      // color = vec4(blendScreen(color.xyz, lightColor), color.w);
     }
   }
 

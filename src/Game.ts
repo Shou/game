@@ -759,9 +759,9 @@ export const renderThoseLayers: renderThoseLayers = (state, elems) => {
 type runLayers = (
   state: GameState,
   layers: Array<(gameState: GameState) => GameElements>,
-  ) => GameChunks
+  ) => GameChunks<GameElement>
 const runLayers: runLayers = (state, layers) => {
-  let acc: GameChunks = {}
+  let acc: GameChunks<GameElement> = {}
 
   for (const layer of layers) {
     try {

@@ -126,7 +126,7 @@ const mkGrassLeaf: mkGrassLeaf = (coord, radius) => {
 }
 
 type mkCaves = (seed: number, quantity: number) => {
-  caves: GameChunks
+  caves: GameChunks<GameElement>
   dimensions: Coord & Rectangle
 }
 const mkCaves: mkCaves = (seed, quantity) => {
@@ -172,7 +172,7 @@ const mkCaves: mkCaves = (seed, quantity) => {
     layer: 32 as Natural,
   }
 
-  let caves: GameChunks = {}
+  let caves: GameChunks<GameElement> = {}
   for (let ix = x; ix < x + width; ix++) {
     for (let iy = y; iy < height; iy++) {
       if (!walkSet.has(`${ix}x${iy}`)) {
@@ -207,7 +207,7 @@ const mkCaves: mkCaves = (seed, quantity) => {
 }
 
 type mkGrass = (seed: number, quantity: number, start: number) => {
-  grasses: GameChunks
+  grasses: GameChunks<GameElement>
   dimensions: Coord & Rectangle
 }
 const mkGrass: mkGrass = (seed, quantity, start) => {
@@ -227,7 +227,7 @@ const mkGrass: mkGrass = (seed, quantity, start) => {
     layer: 32 as Natural,
   }
 
-  let grasses: GameChunks = {}
+  let grasses: GameChunks<GameElement> = {}
   for (let i = 0; i < walk.length; i++) {
     const { x, y } = walk[i]
 
@@ -257,8 +257,8 @@ const mkGrass: mkGrass = (seed, quantity, start) => {
   }
 }
 
-let world: GameChunks = []
-type renderWorld = (state: GameState) => GameChunks
+let world: GameChunks<GameElement> = []
+type renderWorld = (state: GameState) => GameChunks<GameElement>
 export const renderWorld: renderWorld = (state) => {
   if (Object.keys(world).length === 0) {
     const {

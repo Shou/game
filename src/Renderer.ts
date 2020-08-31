@@ -1,11 +1,19 @@
 import * as Pixi from "pixi.js"
+import { Viewport } from "pixi-viewport"
 import * as Matter from "matter-js"
+import * as Ecsy from "ecsy"
+
 //import * as Color from "./Color"
+import * as Chunks from "./Chunks"
 import * as Shader from "./Shader"
 import {
   Coord,
   X, Y,
 } from "./Math"
+import * as Map from "./MapLoader"
+
+import testMap from "./map-test"
+
 
 const {
   PI,
@@ -13,35 +21,71 @@ const {
   min, max,
   round, floor, ceil,
   sign,
+  pow,
 } = Math
 
 type clamp = (a: number, n: number, b: number) => number
 const clamp: clamp = (a, n, b) => max(a, min(n, b))
 
+interface Pixi {
+  app: any
+  viewport: any
+}
+
+interface App {
+  pixi: Pixi
+  world: Matter.World
+  chunks: Chunks.GameChunks<any>
+}
+
 // smoke unsafe code every day 420
 type Shape = any
 type Graphics = any
 
-interface Uniform {
-  readonly index: number
-  readonly reference: Array<any>
-}
+type LightUniform = [
+  number, number, number,
+  number, number, number,
+  number, number, number,
+]
+type BlockUniform = [
+  number, number,
+  number, number,
+]
+
+type Uniform = LightUniform | BlockUniform
 
 interface Elem {
+  // idk if we need this anymore, was previously used for physics
   shape: Shape
+  // The physics object. Use this for sik fysix
   body: Matter.Body
+  // The graphics object. Rules:
+  //  1. don't use it for position
+  //  2. only use it for visuals
   graphics: Graphics
+  // This is temporary until we get sprites and more complex graphics
   color: number
+  // Shader uniform
   readonly uniform?: Uniform
+  loaded: boolean
+}
+
+interface StaticElem extends Elem {
+  type: "Static"
+  uniform: BlockUniform
+}
+
+interface Light extends Elem {
+  type: "Light"
+  uniform: LightUniform
 }
 
 interface Entity extends Required<Elem> {
-  velocity: Coord
+  type: "Entity"
   airborne: boolean
 }
 
-
-type mkElem = (app: any, shape: Shape, color: number) => Elem
+type mkElem = (app: App, shape: Shape, color: number) => Elem
 const mkElem: mkElem = (app, shape, color) => {
   const graphics: any = new Pixi.Graphics()
   graphics.x = shape.x
@@ -49,8 +93,6 @@ const mkElem: mkElem = (app, shape, color) => {
   graphics.beginFill(color, 1)
   graphics.drawShape({ ...shape, x: 0, y: 0 })
   graphics.endFill()
-
-  app.stage.addChild(graphics)
 
   let body
   if ("width" in shape && "height" in shape) {
@@ -60,89 +102,97 @@ const mkElem: mkElem = (app, shape, color) => {
       shape.y + shape.height * 0.5 - 32,
       shape.width,
       shape.height,
+      {
+        //inertia: Infinity,
+      }
     )
   } else {
-    body = Matter.Bodies.circle(shape.x, shape.y, shape.radius)
+    // wtf
+    body = Matter.Bodies.circle(
+      shape.x - shape.radius * 0.5,
+      shape.y - shape.radius * 0.5,
+      shape.radius,
+      {
+        //inertia: Infinity,
+      }
+    )
   }
   Matter.Body.setStatic(body, true)
-  Matter.World.add(app.world, body)
+  // TODO remove this too? and do this as part of chunk loading
 
   return {
     shape,
     body,
     graphics,
     color,
+    loaded: false,
   }
 }
 
-type Uniforms = { [key: string]: Array<number> }
-
-type setUniform = <R extends Uniforms>(
-  uniforms: R,
-  key: keyof R,
-  index: number,
-  values: Array<any>,
-) => void
-const setUniform: setUniform = (uniforms, key, index, values) => {
-  for (let i = 0; i < values.length; i++) {
-    uniforms[key][index + i] = values[i]
-  }
-}
-
-type mkEntity = (app: any, shape: Shape, color: number, uniform: Array<number>) => Entity
-const mkEntity: mkEntity = (app, shape, color, uniform) => {
-  const index = uniform.length
-  const points = getRectVertices(shape, app.view.width, app.view.height)
-
-  for (let i = 0; i < points.length; i++) {
-    uniform[index + i] = points[i]
-  }
+type mkEntity = (app: App, shape: Shape, color: number) => Entity
+const mkEntity: mkEntity = (app, shape, color) => {
+  const uniform = getRectVertices(
+    shape,
+    app.pixi.app.view.width,
+    app.pixi.app.view.height,
+  )
 
   const elem = mkElem(app, shape, color)
   Matter.Body.setStatic(elem.body, false)
-  elem.body.friction = 1.0
+  elem.body.friction = 0.01
+  elem.body.frictionAir = 0.05
 
   return {
+    type: "Entity",
     ...elem,
-    uniform: {
-      index,
-      reference: uniform,
-    },
-    velocity: { x: 0, y: 0 } as Coord,
+    uniform,
     airborne: false,
   }
 }
 
-type mkLight = (app: any, shape: Shape, color: number, uniform: Array<number>) => Elem
-const mkLight: mkLight = (app, shape, color, uniform) => {
-  const index = uniform.length
+type mkLight = (app: App, shape: Shape, color: number) => Light
+const mkLight: mkLight = (app, shape, color) => {
   const elem = mkElem(app, shape, color)
 
-  // Position
-  uniform[index + 0] = elem.shape.x / app.view.width
-  uniform[index + 1] = elem.shape.y / app.view.height
-  uniform[index + 2] = 0
-  // Shape
-  uniform[index + 3] = shape.radius / app.view.width
-  uniform[index + 4] = shape.radius / app.view.height
-  // Light strength / distance traveled
-  uniform[index + 5] = 0.1
-  // Color
-  uniform[index + 6] = (color >> 16) / 255
-  uniform[index + 7] = (color >> 8 & 0xFF) / 255
-  uniform[index + 8] = (color & 0xFF) / 255
-  // Maybe we can use this to define the shape... rectangle = 1, oval = 0?
+  const uniform: LightUniform = [
+    // Position
+    elem.shape.x / app.pixi.app.view.width,
+    elem.shape.y / app.pixi.app.view.height,
+    0,
+    // Shape
+    shape.radius / app.pixi.app.view.width,
+    shape.radius / app.pixi.app.view.height,
+    // Lighth / distance traveled
+    0.1,
+    // Color
+    (color >> 16) / 255,
+    (color >> 8 & 0xFF) / 255,
+    (color & 0xFF) / 255,
+    // Maybe we can use this to define the shape... rectangle = 1, oval = 0?
+  ]
 
   return {
+    type: "Light",
     ...elem,
-    uniform: {
-      index,
-      reference: uniform,
-    }
+    uniform,
   }
 }
 
-type getRectVertices = (rect: any, w: number, h: number) => [number, number, number, number]
+type loadElem = <T extends Elem>(app: App, elem: T) => void
+const loadElem: loadElem = (app, elem) => {
+  app.pixi.viewport.addChild(elem.graphics)
+  Matter.World.add(app.world, elem.body)
+  elem.loaded = true
+}
+
+type unloadElem = <T extends Elem>(app: App, elem: T) => void
+const unloadElem: unloadElem = (app, elem) => {
+  app.pixi.viewport.removeChild(elem.graphics)
+  Matter.World.remove(app.world, elem.body)
+  elem.loaded = false
+}
+
+type getRectVertices = (rect: any, w: number, h: number) => BlockUniform
 const getRectVertices: getRectVertices = (rect, w, h) => {
   return [
     rect.left / w,
@@ -154,35 +204,47 @@ const getRectVertices: getRectVertices = (rect, w, h) => {
 
 type accelerate = (entity: Entity) => void
 const accelerate: accelerate = (entity) => {
-  const {
-    velocity: v
-  } = entity
-  const gravity = 8
-  const walk = 12
-  const jump = 64
-
   if (Object.keys(activeKeys).length) {
     console.log(activeKeys, "activeKeys")
-    console.log(entity.body, "entity body")
   }
 
+  // TODO there has to be a way to set X velocity without affecting Y.
+  //      Right now setting Y slows falling down.
   if ("d" in activeKeys) {
-    Matter.Body.setVelocity(entity.body, { x: 1, y: entity.body.velocity.y })
+    Matter.Sleeping.set(entity.body, false)
+    Matter.Body.setVelocity(
+      entity.body,
+      {
+        x: Math.min(5, (entity.body.velocity.x + 5) / 2),
+        y: entity.body.velocity.y,
+      }
+    )
   }
   if ("a" in activeKeys) {
-    Matter.Body.setVelocity(entity.body, { x: -1, y: entity.body.velocity.y })
+    Matter.Sleeping.set(entity.body, false)
+    Matter.Body.setVelocity(
+      entity.body,
+      {
+        x: Math.max(-5, (entity.body.velocity.x - 5) / 2),
+        y: entity.body.velocity.y,
+      }
+    )
   }
   if (" " in activeKeys && !entity.airborne) {
-    Matter.Body.setVelocity(entity.body, { x: entity.body.velocity.x, y: -2 })
+    Matter.Body.applyForce(
+      entity.body,
+      entity.body.position,
+      { x: 0, y: -0.20 }
+    )
   }
 }
 
 type move = (entity: Elem, x: number, y: number) => void
 const move: move = (entity, x, y) => {
-  entity.graphics.x = clamp(0, x, 64 * 16)
-  entity.graphics.y = max(0, y % (64 * 12))
-  entity.shape.x = entity.graphics.x
-  entity.shape.y = entity.graphics.y
+  entity.graphics.x = x
+  entity.graphics.y = y
+  entity.shape.x = x
+  entity.shape.y = y
 }
 
 type movement = (entity: Elem) => void
@@ -199,7 +261,6 @@ let activeKeys: Record<string, number> = {}
 type keybindings = () => void
 const keybindings: keybindings = () => {
   window.addEventListener("keydown", (event) => {
-    console.log(event)
     activeKeys[event.key] = Date.now()
   })
   window.addEventListener("keyup", (event) => {
@@ -212,19 +273,97 @@ const keybindings: keybindings = () => {
   })
 }
 
-let debug: (f: (block: any) => void) => void
-  = null as any
+type tileToElem = (app: App, tile: Map.Tile) => Required<Elem> | Light
+const tileToElem: tileToElem = (app, tile) => {
+  const x = tile.x * 64
+  const y = tile.y * 64
+
+  switch (tile.type) {
+    case Map.TileType.Grass: {
+      const shape = new Pixi.Rectangle(x, y, 64, 64)
+      const elem = mkElem(app, shape, 0x33DD66)
+      Chunks.appendChunk(
+        app.chunks,
+        Chunks.toChunkCoord(elem.body.position as Coord),
+        [elem],
+      )
+      return {
+        ...elem,
+        uniform: getRectVertices(elem.shape, app.pixi.app.view.width, app.pixi.app.view.height),
+      }
+    }
+
+    case Map.TileType.StrongLight: {
+      const shape: Shape = new Pixi.Circle(x, y, 32)
+      return mkLight(app, shape, 0xFFFFFF)
+    }
+
+    default: {
+      const shape = new Pixi.Rectangle(x, y, 64, 64)
+      const elem = mkElem(app, shape, 0xD8D0D0)
+      return {
+        ...elem,
+        uniform: getRectVertices(elem.shape, app.pixi.app.view.width, app.pixi.app.view.height),
+      }
+    }
+  }
+}
+
+const calculateGameSize = (canvas: HTMLCanvasElement, size: number) => {
+  console.log(canvas, "canvas")
+  const cwRatio = canvas.clientWidth / canvas.clientHeight
+  const wRatio = clamp(4/3, cwRatio, 16/9)
+
+  const w = (Math.floor(size * wRatio / 64) * 64) - size
+
+  return {
+    width: size + w * 0.5,
+    height: size - w * 0.5,
+  }
+}
 
 type main = (view: HTMLCanvasElement, pausedState: any) => void
 export const main: main = (view, pausedState) => {
-  const app = new Pixi.Application({
-    width: 64 * 16,
-    height: 64 * 12,
+  const {
+    width,
+    height,
+  } = calculateGameSize(view, 1024)
+
+  view.addEventListener("resize", event => {
+    calculateGameSize(view, 1024)
+  })
+
+  const pixiApp = new Pixi.Application({
+    width,
+    height,
     antialias: true,
     transparent: false,
     resolution: 1,
     view,
   }) as any
+
+  const viewport = new Viewport({
+    worldWidth: pixiApp.width,
+    worldHeight: pixiApp.height,
+  })
+
+  pixiApp.stage.addChild(viewport)
+
+  const engine = Matter.Engine.create({
+    positionIterations: 1,
+    velocityIterations: 1,
+    constraintIterations: 1,
+    enableSleeping: true,
+  })
+
+  const app: App = {
+    pixi: {
+      app: pixiApp,
+      viewport,
+    },
+    world: engine.world,
+    chunks: {},
+  }
 
   keybindings()
 
@@ -235,175 +374,134 @@ export const main: main = (view, pausedState) => {
   // We can use middle as glossiness... maybe
   const uniforms = {
       rects: [] as Array<number>,
+      entities: [] as Array<number>,
       lights: [] as Array<number>,
   }
-  const engine = Matter.Engine.create()
-  app.world = engine.world
 
-  const debugBlock = mkElem(app, new Pixi.Rectangle(0, 0, 100, 100), 0xFF0000)
-  debugBlock.graphics.alpha = 0.5
-  debug = f => f(debugBlock.graphics)
+  const worldMap = Map.parseText(testMap)
+  if (worldMap instanceof Error) throw worldMap
 
-  const structures: Array<Elem> = []
   const entities: Array<Entity> = []
 
   // Background
-  const bgShape = new Pixi.Rectangle(0, 0, app.view.width, app.view.height)
+  const bgShape = new Pixi.Rectangle(0, 0, pixiApp.view.width, pixiApp.view.height)
   const bgGraphics: any = new Pixi.Graphics()
   bgGraphics.x = bgShape.x
   bgGraphics.y = bgShape.y
-  bgGraphics.beginFill(0x8C8888, 1)
+  bgGraphics.beginFill(0x115599, 1)
   bgGraphics.drawShape({ ...bgShape, x: 0, y: 0 })
   bgGraphics.endFill()
-  app.stage.addChild(bgGraphics)
+  viewport.addChild(bgGraphics)
 
-  const floorShape = new Pixi.Rectangle(0, app.view.height - 64, app.view.width, 64)
-  const floorElem: Elem = mkElem(app, floorShape, 0xAFAAAA)
-  structures.push(floorElem)
-  uniforms.rects = [
-    ...uniforms.rects,
-    ...getRectVertices(floorShape, app.view.width, app.view.height),
-  ]
+  const elems = worldMap.map(tile => tileToElem(app, tile))
+  elems.forEach(elem => {
+    const type = "type" in elem ? elem.type : null
+    switch (type) {
+      case "Light": {
+        elem.uniform.forEach(
+          u => uniforms.lights[uniforms.lights.length] = u
+        )
+      }
 
-  const platformShape = new Pixi.Rectangle(64 * 2, 64 * 8, 64 * 7, 64)
-  const platform: Elem = mkElem(app, platformShape, 0xAFAAAA)
-  structures.push(platform)
-  uniforms.rects = [
-    ...uniforms.rects,
-    ...getRectVertices(platformShape, app.view.width, app.view.height)
-  ]
-
-  const wallShape = new Pixi.Rectangle(64 * 8, 64 * 2, 64, 64 * 4)
-  const wall: Elem = mkElem(app, wallShape, 0xAFAAAA)
-  structures.push(wall)
-  uniforms.rects = [
-    ...uniforms.rects,
-    ...getRectVertices(wallShape, app.view.width, app.view.height)
-  ]
-
-  const floatyboiShape = new Pixi.Rectangle(64 * 11, 64 * 7, 128, 128)
-  const floatyboi: Elem = mkElem(app, floatyboiShape, 0xAFAAAA)
-  structures.push(floatyboi)
-  uniforms.rects = [
-    ...uniforms.rects,
-    ...getRectVertices(floatyboiShape, app.view.width, app.view.height)
-  ]
-
-  //const balloonShape: Shape = new Pixi.Circle(64 * 11, 64 * 7, 64)
-  //const balloonElem: Elem = mkElem(balloonShape, 0xAA1111)
-  //structures.push(balloonElem)
-  //app.stage.addChild(balloonElem.graphics)
-
-  const lightShape: Shape = new Pixi.Circle(app.view.width * 0.5, 8 * 64 - 32, 32)
-  const light: Elem = mkLight(app, lightShape, 0xFFFFFF, uniforms.lights)
-  structures.push(light)
-
-  const lampShape: Shape
-    = new Pixi.Circle(app.view.width - 48, app.view.height * 0.5, 32)
-  const lamp: Elem = mkLight(app, lampShape, 0xFFFFFF, uniforms.lights)
-  structures.push(lamp)
-
-  const floorLightShape: Shape
-    = new Pixi.Circle(128, app.view.height - 128, 32)
-  const floorLight: Elem = mkLight(app, floorLightShape, 0xFFFFFF, uniforms.lights)
-  structures.push(floorLight)
+      default: {
+        elem.uniform.forEach(
+          u => uniforms.rects[uniforms.rects.length] = u
+        )
+      }
+    }
+  })
 
   const playerShape
-    = new Pixi.Rectangle(app.view.width * 0.4, app.view.height * 0.4, 64, 64)
-  const player = mkEntity(app, playerShape, 0xD035B0, uniforms.rects)
+    = new Pixi.Rectangle(pixiApp.view.width * 0.4, pixiApp.view.height * 0.4, 64, 64)
+  const player = mkEntity(app, playerShape, 0xD035B0)
+  loadElem(app, player)
   entities.push(player)
+
+  if (uniforms.lights.length === 0) {
+    for (let i = 0; i < 9; i++) uniforms.lights[i] = 0
+  }
 
   const vertexLight = Shader.vertexLight()
   const fragmentLight = Shader.fragmentLight(
     round(uniforms.rects.length * 0.25),
     round(uniforms.lights.length / 3 / 3),
   )
-  console.log(fragmentLight, "fragmentLight")
   const shader = new Pixi.Filter(vertexLight, fragmentLight, uniforms) as any
-  app.stage.filters = [shader]
+  pixiApp.stage.filters = [shader]
 
-  app.ticker.autoStart = false
+  pixiApp.ticker.autoStart = false
 
   let time = 0
 
   // NOTE We can use app.ticker.start/stop() for pausing
-  app.ticker.add(() => {
+  pixiApp.ticker.add(() => {
     time = performance.now()
 
-    for (let i = 0; i < Math.ceil(app.ticker.elapsedMS / 5); i++) {
-      Matter.Engine.update(engine, 5)
-      console.log(i, "time step")
+    for (let i = 0; i < Math.ceil(pixiApp.ticker.elapsedMS / 16); i++) {
+      Matter.Engine.update(engine, 16)
+    }
+
+    const elems = Chunks.getElemsInRect(
+      app.chunks,
+      viewport.left,
+      viewport.top,
+      viewport.screenWorldWidth,
+      viewport.screenWorldHeight,
+    )
+    console.log(elems, "rect elems")
+    for (const elem of elems) {
+      if (!elem.loaded) loadElem(app, elem)
     }
 
     for (const entity of entities) {
       Matter.Body.setAngle(entity.body, 0)
-      accelerate(entity)
-      movement(entity)
-      Matter.Body.setPosition(
-        entity.body,
-        {
-          x: clamp(0, entity.body.position.x, 64 * 15),
-          y: max(0, entity.body.position.y % (64 * 12)),
-        }
-      )
 
-      const vsPlayer = getRectVertices(playerShape, app.view.width, app.view.height)
-      for (let i = 0; i < 4; i++) {
-        uniforms.rects[player.uniform.index + i] = vsPlayer[i]
+      const nearBodies = elems.flatMap(({ body }) => {
+        const x = body.position.x - entity.body.position.x
+        const y = body.position.y - entity.body.position.y
+
+        const distance = sqrt(
+          pow(x, 2) + pow(y, 2)
+        )
+        if (distance < 64) {
+          return [entity.body]
+        }
+        return []
+      })
+      const collisions = Matter.Query.collides(
+        entity.body,
+        nearBodies,
+      )
+      // TODO only airborne when not touching ground
+      if (collisions.length) {
+        //console.log(collisions)
+        entity.airborne = false
+      } else {
+        entity.airborne = true
       }
 
-      const newLampX = 12 * 64 + cos(time * 0.001) * 128
-      const newLampY = 256 + sin(time * 0.001) * 128
-      Matter.Body.setVelocity(
-        lamp.body,
-        {
-          x: newLampX - lamp.body.position.x,
-          y: newLampY - lamp.body.position.y,
-        }
-      )
-      Matter.Body.setPosition(
-        lamp.body,
-        {
-          x: newLampX,
-          y: newLampY,
-        },
-      )
-      movement(lamp)
-      setUniform(uniforms, "lights", 9, [
-        lamp.shape.x / app.view.width,
-        lamp.shape.y / app.view.height,
-      ])
+      accelerate(entity)
+      movement(entity)
 
-      const newFloorLightX = app.view.width * 0.5 + cos(time * 0.001) * 8 * 64
-      Matter.Body.setVelocity(
-        floorLight.body,
-        {
-          x: newFloorLightX - floorLight.body.position.x,
-          y: 0,
-        }
-      )
-      Matter.Body.setPosition(
-        floorLight.body,
-        {
-          x: newFloorLightX,
-          y: floorLight.shape.y,
-        },
-      )
-      movement(floorLight)
-      setUniform(uniforms, "lights", 18, [
-        floorLight.shape.x / app.view.width,
-        floorLight.shape.y / app.view.height,
-      ])
+      const vsPlayer = getRectVertices(playerShape, pixiApp.view.width, pixiApp.view.height)
+      for (let i = 0; i < 4; i++) {
+        uniforms.entities[i] = vsPlayer[i]
+      }
     }
+
+    viewport.moveCenter(
+      player.body.position.x,
+      player.body.position.y,
+    )
   })
 
   // TODO polling is bad and we should use listeners
   setInterval(() => {
     const { paused } = pausedState.get()
-    if (!paused && !app.ticker.started) {
-      app.ticker.start()
-    } else if(paused && app.ticker.started) {
-      app.ticker.stop()
+    if (!paused && !pixiApp.ticker.started) {
+      pixiApp.ticker.start()
+    } else if(paused && pixiApp.ticker.started) {
+      pixiApp.ticker.stop()
     }
   }, 100)
 }

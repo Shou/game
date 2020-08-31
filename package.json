@@ -4,9 +4,10 @@
   "description": "Game lol",
   "main": "src/index.ts",
   "dependencies": {
+    "ecsy": "^0.4.1",
     "matter-js": "^0.14.2",
+    "pixi-viewport": "^4.13.2",
     "pixi.js": "^5.2.4",
-    "planck-js": "file:/home/benedict/Prog/Javascript/planck.js",
     "prando": "^5.1.2",
     "ramda": "^0.27.0",
     "react": "^16.13.1",

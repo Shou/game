@@ -15,6 +15,7 @@ import {
 } from "./Math"
 import { ScopedState } from "./ScopedState"
 import {
+  GameElement,
   GameTexture,
   Rectangle,
 } from "./Texture"
@@ -123,7 +124,7 @@ export interface GameState {
   settings: Settings
   activeKeys: ActiveKeys
   zoom: number
-  chunks: GameChunks
+  chunks: GameChunks<GameElement>
   paused: boolean
 }
 
