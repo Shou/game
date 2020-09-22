@@ -1,6 +1,4 @@
-import {
-  ChunkCoord,
-} from "./Chunks"
+import * as Chunks from "./Chunks"
 import {
   Unique,
   MkNewtype,
@@ -71,14 +69,14 @@ export interface Coord {
 
 // Cantor pair and a bijection from integer to natural because cantor pairs
 // only deal in absolutes
-type toCantor = (c: ChunkCoord) => Natural
+type toCantor = (c: Chunks.Coord) => Natural
 export const toCantor: toCantor = ({ x, y }) => {
   const aNat = x >= 0 ? x * 2 : -x * 2 - 1
   const bNat = y >= 0 ? y * 2 : -y * 2 - 1
   return 0.5 * (aNat + bNat) * (aNat + bNat + 1) + bNat as any as Natural
 }
 
-type fromCantor = (c: Natural) => ChunkCoord
+type fromCantor = (c: Natural) => Chunks.Coord
 export const fromCantor: fromCantor = (c) => {
   const w = floor(0.5 * (sqrt(8 * c + 1 as Natural) - 1))
   const t = w * (w + 1) * 0.5
@@ -87,7 +85,7 @@ export const fromCantor: fromCantor = (c) => {
   return {
     x: coerce(floor(xNat % 2 === 0 ? xNat * 0.5 : -(xNat + 1) * 0.5)),
     y: coerce(floor(yNat % 2 === 0 ? yNat * 0.5 : -(yNat + 1) * 0.5)),
-  } as any as ChunkCoord
+  } as any as Chunks.Coord
 }
 
 export const dot: (left: [X, Y], right: [X, Y]) => number

@@ -1,10 +1,4 @@
-import * as Assets from "./Assets"
-import {
-  ChunkCoord,
-  GameChunks,
-  CHUNK_RATIO,
-  toChunkCoord,
-} from "./Chunks"
+import * as Chunks from "./Chunks"
 import * as Color from "./Color"
 import * as Debug from "./Debug"
 import * as Effects from "./Effects"
@@ -65,6 +59,12 @@ import Prando from "prando"
 import { minBy, sortBy } from "ramda"
 import * as React from "react"
 
+const Assets = {
+  starsImage: document.createElement("img"),
+  cloudImages: [],
+  mountainImages: [],
+}
+
 // 314 smoke math
 const {
   sin, cos, min, max, pow, random, atan2,
@@ -88,10 +88,10 @@ export const getScreenChunks: getScreenChunks = (state) => {
     chunks,
   } = state
 
-  let coords = { x: 0 as X, y: 0 as Y } as ChunkCoord
+  let coords = { x: 0 as X, y: 0 as Y } as Chunks.Coord
   let blocks: GameElements = []
-  for (let ix = floor(x * CHUNK_RATIO); ix < ceil((x + width) * CHUNK_RATIO + 1); ix++) {
-    for (let iy = floor(y * CHUNK_RATIO); iy < ceil((y + height) * CHUNK_RATIO + 1); iy++) {
+  for (let ix = floor(x * Chunks.CHUNK_RATIO); ix < ceil((x + width) * Chunks.CHUNK_RATIO + 1); ix++) {
+    for (let iy = floor(y * Chunks.CHUNK_RATIO); iy < ceil((y + height) * Chunks.CHUNK_RATIO + 1); iy++) {
       coords.x = coerce(ix)
       coords.y = coerce(iy)
       const elems = chunks?.[toCantor(coords)]
@@ -759,9 +759,9 @@ export const renderThoseLayers: renderThoseLayers = (state, elems) => {
 type runLayers = (
   state: GameState,
   layers: Array<(gameState: GameState) => GameElements>,
-  ) => GameChunks<GameElement>
+  ) => Chunks.Chunks<GameElement>
 const runLayers: runLayers = (state, layers) => {
-  let acc: GameChunks<GameElement> = {}
+  let acc: Chunks.Chunks<GameElement> = {}
 
   for (const layer of layers) {
     try {
@@ -769,7 +769,7 @@ const runLayers: runLayers = (state, layers) => {
 
       for (const elem of elems) {
         const cantorPair: Natural
-          = toCantor(toChunkCoord(elem.coord))
+          = toCantor(Chunks.toCoord(elem.coord))
 
         acc[cantorPair] = (acc[cantorPair] || []).concat([ elem ])
       }
@@ -1048,12 +1048,12 @@ const collisionResolution2: collisionResolution2 = (state) => {
 
   // X is OK, Y is NOT OK
   // Get the range of chunks from the player to the projected (velocity) position
-  const fromX = player.coord.x * CHUNK_RATIO
-  const toX = (player.coord.x + player.width * 0.5 * sign(velocity.x) + velocity.x) * CHUNK_RATIO
+  const fromX = player.coord.x * Chunks.CHUNK_RATIO
+  const toX = (player.coord.x + player.width * 0.5 * sign(velocity.x) + velocity.x) * Chunks.CHUNK_RATIO
   const rx = range(round(fromX), round(toX))
 
-  const fromY = player.coord.y * CHUNK_RATIO
-  const toY = (player.coord.y + player.height * 0.5 * sign(velocity.y) + velocity.y) * CHUNK_RATIO
+  const fromY = player.coord.y * Chunks.CHUNK_RATIO
+  const toY = (player.coord.y + player.height * 0.5 * sign(velocity.y) + velocity.y) * Chunks.CHUNK_RATIO
   const ry = range(
     repel(toY, fromY),
     repel(fromY, toY),
@@ -1063,11 +1063,11 @@ const collisionResolution2: collisionResolution2 = (state) => {
   for (const x of rx) {
     for (const y of ry) {
       const coord = { x: coerce(x) as X, y: coerce(y) as Y } as Coord
-      elems = elems.concat(chunks?.[toCantor(toChunkCoord(coord))] || [])
+      elems = elems.concat(chunks?.[toCantor(Chunks.toCoord(coord))] || [])
       if (elems.length && !firstCrash) {
         firstCrash = {
-          x: x * (1 / CHUNK_RATIO) + 50,
-          y: y * (1 / CHUNK_RATIO),
+          x: x * (1 / Chunks.CHUNK_RATIO) + 50,
+          y: y * (1 / Chunks.CHUNK_RATIO),
         } as Coord
       }
     }

@@ -1,7 +1,7 @@
 // the sikest file
 
 import {
-  GameChunks,
+  Chunks,
 } from "./Chunks"
 import { Effects } from "./Effects"
 import {
@@ -124,7 +124,7 @@ export interface GameState {
   settings: Settings
   activeKeys: ActiveKeys
   zoom: number
-  chunks: GameChunks<GameElement>
+  chunks: Chunks<GameElement>
   paused: boolean
 }
 

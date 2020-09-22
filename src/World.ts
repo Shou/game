@@ -1,12 +1,4 @@
-import {
-  ChunkCoord,
-  GameChunks,
-  CHUNK_RATIO,
-  deleteChunk,
-  fromChunkCoord,
-  insertChunk,
-  toChunkCoord,
-} from "./Chunks"
+import * as Chunks from "./Chunks"
 import * as Color from "./Color"
 import {
   Coord,
@@ -126,7 +118,7 @@ const mkGrassLeaf: mkGrassLeaf = (coord, radius) => {
 }
 
 type mkCaves = (seed: number, quantity: number) => {
-  caves: GameChunks<GameElement>
+  caves: Chunks.Chunks<GameElement>
   dimensions: Coord & Rectangle
 }
 const mkCaves: mkCaves = (seed, quantity) => {
@@ -172,7 +164,7 @@ const mkCaves: mkCaves = (seed, quantity) => {
     layer: 32 as Natural,
   }
 
-  let caves: GameChunks<GameElement> = {}
+  let caves: Chunks.Chunks<GameElement> = {}
   for (let ix = x; ix < x + width; ix++) {
     for (let iy = y; iy < height; iy++) {
       if (!walkSet.has(`${ix}x${iy}`)) {
@@ -184,7 +176,7 @@ const mkCaves: mkCaves = (seed, quantity) => {
         const scribbles: Array<CoreElem<GameArc>>
           = mkEscher(coord, 50 as Natural)
 
-        caves = insertChunk(caves, toChunkCoord(coord), [
+        caves = Chunks.insert(caves, Chunks.toCoord(coord), [
           {
             texture,
             coord,
@@ -207,7 +199,7 @@ const mkCaves: mkCaves = (seed, quantity) => {
 }
 
 type mkGrass = (seed: number, quantity: number, start: number) => {
-  grasses: GameChunks<GameElement>
+  grasses: Chunks.Chunks<GameElement>
   dimensions: Coord & Rectangle
 }
 const mkGrass: mkGrass = (seed, quantity, start) => {
@@ -227,7 +219,7 @@ const mkGrass: mkGrass = (seed, quantity, start) => {
     layer: 32 as Natural,
   }
 
-  let grasses: GameChunks<GameElement> = {}
+  let grasses: Chunks.Chunks<GameElement> = {}
   for (let i = 0; i < walk.length; i++) {
     const { x, y } = walk[i]
 
@@ -240,7 +232,7 @@ const mkGrass: mkGrass = (seed, quantity, start) => {
           x: start + ix * width as X,
           y: iy * height as Y,
         } as Coord
-        grasses = insertChunk(grasses, toChunkCoord(coord), [
+        grasses = Chunks.insert(grasses, Chunks.toCoord(coord), [
           {
             texture,
             coord,
@@ -257,8 +249,8 @@ const mkGrass: mkGrass = (seed, quantity, start) => {
   }
 }
 
-let world: GameChunks<GameElement> = []
-type renderWorld = (state: GameState) => GameChunks<GameElement>
+let world: Chunks.Chunks<GameElement> = []
+type renderWorld = (state: GameState) => Chunks.Chunks<GameElement>
 export const renderWorld: renderWorld = (state) => {
   if (Object.keys(world).length === 0) {
     const {
@@ -278,14 +270,14 @@ export const renderWorld: renderWorld = (state) => {
     let cavesMaskedGrass = caves
     for (const key in grasses) {
       const c = parseInt(key) as Natural
-      const coord: ChunkCoord = fromCantor(c)
+      const coord: Chunks.Coord = fromCantor(c)
       let hasCaveAbove = coord.y >= 0
       let j = 1 as Y
       while (hasCaveAbove) {
-        const up: ChunkCoord = { ...coord, y: diff(coord.y, j) }
+        const up: Chunks.Coord = { ...coord, y: diff(coord.y, j) }
         if (toCantor(up) in caves) {
           console.log(`${up.x} x ${up.y}`, "deleted")
-          cavesMaskedGrass = deleteChunk(caves, up)
+          cavesMaskedGrass = Chunks.remove(caves, up)
         } else {
           hasCaveAbove = up.y >= 0
         }
@@ -294,7 +286,7 @@ export const renderWorld: renderWorld = (state) => {
     }
     for (const key in grasses) {
       const coord = fromCantor(parseInt(key) as Natural)
-      cavesMaskedGrass = insertChunk(cavesMaskedGrass, coord, grasses[key])
+      cavesMaskedGrass = Chunks.insert(cavesMaskedGrass, coord, grasses[key])
     }
 
     world = cavesMaskedGrass

@@ -14,6 +14,12 @@ import * as Map from "./MapLoader"
 
 import testMap from "./map-test"
 
+import * as Snow from "./shaders/snow"
+import * as Ice from "./shaders/ice"
+
+import topGroundPng from "../assets/TopGround.png"
+import groundPng from "../assets/Ground.png"
+
 
 const {
   PI,
@@ -22,6 +28,7 @@ const {
   round, floor, ceil,
   sign,
   pow,
+  abs,
 } = Math
 
 type clamp = (a: number, n: number, b: number) => number
@@ -35,7 +42,7 @@ interface Pixi {
 interface App {
   pixi: Pixi
   world: Matter.World
-  chunks: Chunks.GameChunks<any>
+  chunks: Chunks.Chunks<any>
 }
 
 // smoke unsafe code every day 420
@@ -63,8 +70,6 @@ interface Elem {
   //  1. don't use it for position
   //  2. only use it for visuals
   graphics: Graphics
-  // This is temporary until we get sprites and more complex graphics
-  color: number
   // Shader uniform
   readonly uniform?: Uniform
   loaded: boolean
@@ -83,23 +88,37 @@ interface Light extends Elem {
 interface Entity extends Required<Elem> {
   type: "Entity"
   airborne: boolean
+  control: "NPC" | "Controlled"
+  bag?: Record<string, any>
 }
 
-type mkElem = (app: App, shape: Shape, color: number) => Elem
+
+let us: Record<string, Record<string, any>>
+  = {}
+
+
+type mkElem = (app: App, shape: Shape, color: number | string) => Elem
 const mkElem: mkElem = (app, shape, color) => {
-  const graphics: any = new Pixi.Graphics()
+  let graphics: any = null
+  if (typeof color === "number") {
+    graphics = new Pixi.Graphics()
+    graphics.beginFill(color, 1)
+    graphics.drawShape({ ...shape, x: 0, y: 0 })
+    graphics.endFill()
+  } else {
+    graphics = Pixi.Sprite.from(color)
+    graphics.width = 64
+    graphics.height = 64
+  }
   graphics.x = shape.x
   graphics.y = shape.y
-  graphics.beginFill(color, 1)
-  graphics.drawShape({ ...shape, x: 0, y: 0 })
-  graphics.endFill()
 
   let body
   if ("width" in shape && "height" in shape) {
     body = Matter.Bodies.rectangle(
       // there's definitely something wrong here, probably to do with the player???
-      shape.x + shape.width * 0.5 - 32,
-      shape.y + shape.height * 0.5 - 32,
+      shape.x,
+      shape.y,
       shape.width,
       shape.height,
       {
@@ -109,8 +128,8 @@ const mkElem: mkElem = (app, shape, color) => {
   } else {
     // wtf
     body = Matter.Bodies.circle(
-      shape.x - shape.radius * 0.5,
-      shape.y - shape.radius * 0.5,
+      shape.x,
+      shape.y,
       shape.radius,
       {
         //inertia: Infinity,
@@ -118,13 +137,11 @@ const mkElem: mkElem = (app, shape, color) => {
     )
   }
   Matter.Body.setStatic(body, true)
-  // TODO remove this too? and do this as part of chunk loading
 
   return {
     shape,
     body,
     graphics,
-    color,
     loaded: false,
   }
 }
@@ -140,13 +157,14 @@ const mkEntity: mkEntity = (app, shape, color) => {
   const elem = mkElem(app, shape, color)
   Matter.Body.setStatic(elem.body, false)
   elem.body.friction = 0.01
-  elem.body.frictionAir = 0.05
+  elem.body.frictionAir = 0.01
 
   return {
     type: "Entity",
     ...elem,
     uniform,
     airborne: false,
+    control: "NPC",
   }
 }
 
@@ -178,11 +196,18 @@ const mkLight: mkLight = (app, shape, color) => {
   }
 }
 
+const loadedElems: Chunks.Chunks<Elem> = {}
+
 type loadElem = <T extends Elem>(app: App, elem: T) => void
 const loadElem: loadElem = (app, elem) => {
   app.pixi.viewport.addChild(elem.graphics)
   Matter.World.add(app.world, elem.body)
   elem.loaded = true
+  Chunks.insert(
+    loadedElems,
+    elem.body.position as Chunks.Coord,
+    [elem],
+  )
 }
 
 type unloadElem = <T extends Elem>(app: App, elem: T) => void
@@ -190,6 +215,10 @@ const unloadElem: unloadElem = (app, elem) => {
   app.pixi.viewport.removeChild(elem.graphics)
   Matter.World.remove(app.world, elem.body)
   elem.loaded = false
+  Chunks.remove(
+    loadedElems,
+    elem.body.position as Chunks.Coord,
+  )
 }
 
 type getRectVertices = (rect: any, w: number, h: number) => BlockUniform
@@ -211,7 +240,6 @@ const accelerate: accelerate = (entity) => {
   // TODO there has to be a way to set X velocity without affecting Y.
   //      Right now setting Y slows falling down.
   if ("d" in activeKeys) {
-    Matter.Sleeping.set(entity.body, false)
     Matter.Body.setVelocity(
       entity.body,
       {
@@ -221,7 +249,6 @@ const accelerate: accelerate = (entity) => {
     )
   }
   if ("a" in activeKeys) {
-    Matter.Sleeping.set(entity.body, false)
     Matter.Body.setVelocity(
       entity.body,
       {
@@ -234,7 +261,7 @@ const accelerate: accelerate = (entity) => {
     Matter.Body.applyForce(
       entity.body,
       entity.body.position,
-      { x: 0, y: -0.20 }
+      { x: 0, y: -0.33 }
     )
   }
 }
@@ -273,35 +300,86 @@ const keybindings: keybindings = () => {
   })
 }
 
-type tileToElem = (app: App, tile: Map.Tile) => Required<Elem> | Light
+type tileToElem = (app: App, tile: Map.Tile) => StaticElem | Light | Entity
 const tileToElem: tileToElem = (app, tile) => {
   const x = tile.x * 64
   const y = tile.y * 64
 
+  const color = Map.tileToColor(tile.type)
+
   switch (tile.type) {
-    case Map.TileType.Grass: {
+    case Map.TileType.StrongLight: {
+      const shape: Shape = new Pixi.Circle(x, y, 32)
+      return mkLight(app, shape, color)
+    }
+
+    case Map.TileType.WeakLight: {
+      const shape: Shape = new Pixi.Rectangle(x, y, 64, 2 * 64)
+      return mkLight(app, shape, color)
+    }
+
+    case Map.TileType.Player: {
+      const shape: Shape = new Pixi.Rectangle(x, y, 64, 2 * 64)
+      const player = mkEntity(app, shape, color)
+      player.control = "Controlled"
+      return player
+    }
+
+    case Map.TileType.Monster: {
+      const shape: Shape = new Pixi.Rectangle(x, y, 64, 64)
+      const monster = mkEntity(app, shape, color)
+      return monster
+    }
+
+    case Map.TileType.TopGround: {
       const shape = new Pixi.Rectangle(x, y, 64, 64)
-      const elem = mkElem(app, shape, 0x33DD66)
-      Chunks.appendChunk(
+      const elem = mkElem(app, shape, color)
+      Chunks.append(
         app.chunks,
-        Chunks.toChunkCoord(elem.body.position as Coord),
+        Chunks.toCoord(elem.body.position as Coord),
         [elem],
       )
       return {
+        type: "Static",
         ...elem,
         uniform: getRectVertices(elem.shape, app.pixi.app.view.width, app.pixi.app.view.height),
       }
     }
 
-    case Map.TileType.StrongLight: {
-      const shape: Shape = new Pixi.Circle(x, y, 32)
-      return mkLight(app, shape, 0xFFFFFF)
+    case Map.TileType.Ground: {
+      const shape = new Pixi.Rectangle(x, y, 64, 64)
+      const elem = mkElem(app, shape, color)
+      elem.graphics.cacheAsBitmap = false
+
+      us.ice = {
+        uTime: 0
+      }
+      elem.graphics.filters = [
+        new Pixi.Filter(Ice.vertex, Ice.fragment, us.ice)
+      ]
+
+      Chunks.append(
+        app.chunks,
+        Chunks.toCoord(elem.body.position as Coord),
+        [elem],
+      )
+      return {
+        type: "Static",
+        ...elem,
+        uniform: getRectVertices(elem.shape, app.pixi.app.view.width, app.pixi.app.view.height),
+      }
     }
 
     default: {
       const shape = new Pixi.Rectangle(x, y, 64, 64)
-      const elem = mkElem(app, shape, 0xD8D0D0)
+      const elem = mkElem(app, shape, color)
+      Chunks.append(
+        app.chunks,
+        Chunks.toCoord(elem.body.position as Coord),
+        [elem],
+      )
       return {
+        type: "Static",
         ...elem,
         uniform: getRectVertices(elem.shape, app.pixi.app.view.width, app.pixi.app.view.height),
       }
@@ -333,6 +411,9 @@ export const main: main = (view, pausedState) => {
     calculateGameSize(view, 1024)
   })
 
+  // FIXME get rid of flickering, attempt below failed at doing so :(
+  Pixi.settings.ROUND_PIXELS = true
+
   const pixiApp = new Pixi.Application({
     width,
     height,
@@ -353,7 +434,7 @@ export const main: main = (view, pausedState) => {
     positionIterations: 1,
     velocityIterations: 1,
     constraintIterations: 1,
-    enableSleeping: true,
+    enableSleeping: false,
   })
 
   const app: App = {
@@ -382,40 +463,62 @@ export const main: main = (view, pausedState) => {
   if (worldMap instanceof Error) throw worldMap
 
   const entities: Array<Entity> = []
+  const npcs: Array<Entity> = []
 
   // Background
   const bgShape = new Pixi.Rectangle(0, 0, pixiApp.view.width, pixiApp.view.height)
   const bgGraphics: any = new Pixi.Graphics()
   bgGraphics.x = bgShape.x
   bgGraphics.y = bgShape.y
-  bgGraphics.beginFill(0x115599, 1)
+  bgGraphics.beginFill(0x081A2A, 1)
   bgGraphics.drawShape({ ...bgShape, x: 0, y: 0 })
   bgGraphics.endFill()
+  us.background = {
+    uTime: 0,
+    uWorldX: 0,
+  }
+  bgGraphics.filters = [
+    new Pixi.Filter(Snow.vertex, Snow.fragment, us.background) as any
+  ]
   viewport.addChild(bgGraphics)
+
+  let players: Array<Entity> = []
 
   const elems = worldMap.map(tile => tileToElem(app, tile))
   elems.forEach(elem => {
-    const type = "type" in elem ? elem.type : null
-    switch (type) {
+    switch (elem.type) {
       case "Light": {
         elem.uniform.forEach(
           u => uniforms.lights[uniforms.lights.length] = u
         )
+        break
+      }
+
+      case "Entity": {
+        if (elem.control === "Controlled") {
+          entities.push(elem)
+          players.push(elem)
+        } else {
+          entities.push(elem)
+          npcs.push(elem)
+        }
+        break
       }
 
       default: {
         elem.uniform.forEach(
           u => uniforms.rects[uniforms.rects.length] = u
         )
+        break
       }
     }
   })
 
-  const playerShape
-    = new Pixi.Rectangle(pixiApp.view.width * 0.4, pixiApp.view.height * 0.4, 64, 64)
-  const player = mkEntity(app, playerShape, 0xD035B0)
-  loadElem(app, player)
-  entities.push(player)
+  const player = players[0]
+
+  if (!player) {
+    throw new Error("No Player placed on the map, please put a 'P' somewhere.")
+  }
 
   if (uniforms.lights.length === 0) {
     for (let i = 0; i < 9; i++) uniforms.lights[i] = 0
@@ -426,35 +529,65 @@ export const main: main = (view, pausedState) => {
     round(uniforms.rects.length * 0.25),
     round(uniforms.lights.length / 3 / 3),
   )
-  const shader = new Pixi.Filter(vertexLight, fragmentLight, uniforms) as any
-  pixiApp.stage.filters = [shader]
+  //const shader = new Pixi.Filter(vertexLight, fragmentLight, uniforms) as any
+  //pixiApp.stage.filters = [shader]
 
   pixiApp.ticker.autoStart = false
 
   let time = 0
+  const physicsTick = 5
+
+  let evil = { x: [0], y: [0] }
 
   // NOTE We can use app.ticker.start/stop() for pausing
   pixiApp.ticker.add(() => {
     time = performance.now()
-
-    for (let i = 0; i < Math.ceil(pixiApp.ticker.elapsedMS / 16); i++) {
-      Matter.Engine.update(engine, 16)
+    for (const key in us) {
+      us[key].uTime = time
     }
 
-    const elems = Chunks.getElemsInRect(
+    for (let i = 0; i < Math.ceil(pixiApp.ticker.elapsedMS / physicsTick); i++) {
+      Matter.Engine.update(engine, physicsTick)
+    }
+
+    const screenElems = Chunks.getElemsInRect(
       app.chunks,
-      viewport.left,
-      viewport.top,
-      viewport.screenWorldWidth,
-      viewport.screenWorldHeight,
+      viewport.left - 256,
+      viewport.top - 256,
+      viewport.screenWorldWidth + 256,
+      viewport.screenWorldHeight + 256,
     )
-    console.log(elems, "rect elems")
-    for (const elem of elems) {
-      if (!elem.loaded) loadElem(app, elem)
+    for (const elem of screenElems) {
+      if (!elem.loaded) {
+        loadElem(app, elem)
+      }
+    }
+    // TODO why is this commented
+    //for (const key in loadedElems) {
+    //  const elem = loadedElems[key][0]
+    //  if (!screenElems.includes(elem)) {
+    //    unloadElem(app, elem)
+    //  }
+    //}
+
+    accelerate(player)
+
+    for (const npc of npcs) {
+      if (npc.body.velocity.x === 0) {
+        const x = (Math.round(Math.random()) * 2 - 1)
+        Matter.Body.applyForce(
+          npc.body,
+          npc.body.position,
+          { x, y: 0 },
+        )
+      }
     }
 
     for (const entity of entities) {
       Matter.Body.setAngle(entity.body, 0)
+      if (!entity.loaded) {
+        loadElem(app, entity)
+      }
 
       const nearBodies = elems.flatMap(({ body }) => {
         const x = body.position.x - entity.body.position.x
@@ -473,26 +606,40 @@ export const main: main = (view, pausedState) => {
         nearBodies,
       )
       // TODO only airborne when not touching ground
-      if (collisions.length) {
+      if (collisions.length > 0) {
         //console.log(collisions)
         entity.airborne = false
       } else {
         entity.airborne = true
       }
 
-      accelerate(entity)
-      movement(entity)
-
-      const vsPlayer = getRectVertices(playerShape, pixiApp.view.width, pixiApp.view.height)
+      const vsEntity = getRectVertices(entity.shape, pixiApp.view.width, pixiApp.view.height)
       for (let i = 0; i < 4; i++) {
-        uniforms.entities[i] = vsPlayer[i]
+        uniforms.entities[i] = vsEntity[i]
       }
+
+      movement(entity)
     }
 
+    // TODO move evil state somewhere... less static. model state somehow
+    const mx = evil.x.reduce((acc, a) => a + acc, 0) / evil.x.length
+    const my = evil.y.reduce((acc, a) => a + acc, 0) / evil.y.length
+    // NOTE flooring is necessary to get rid of flickering black lines
+    // See: https://github.com/pixijs/pixi.js/issues/4811#issuecomment-377112864
     viewport.moveCenter(
-      player.body.position.x,
-      player.body.position.y,
+      floor(
+        player.body.position.x + min(5, abs(mx) * 0.5) * 50 * sign(mx)
+      ),
+      floor(
+        player.body.position.y + max(0, max(-10, my) * 0.5 * 50)
+      ),
     )
+    evil.x = evil.x.slice(-19).concat(player.body.velocity.x)
+    evil.y = evil.y.slice(-19).concat(player.body.velocity.y)
+    bgGraphics.x = viewport.left
+    bgGraphics.y = viewport.top
+    us.background.uWorldX = viewport.left / 1000
+    console.log(us.background.uWorldX, "uWorldX")
   })
 
   // TODO polling is bad and we should use listeners
