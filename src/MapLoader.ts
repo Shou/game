@@ -49,7 +49,7 @@ export const tileToColor: tileToColor = (tile) => {
     case TileType.DeepGround: return 0x60C6DB
     case TileType.Concrete: return 0xDDD8D8
     case TileType.StrongLight: return 0xFFF8F8
-    case TileType.WeakLight: return 0xFFF0F0
+    case TileType.WeakLight: return 0xF0E8E0
     case TileType.MovingPlatform: return 0xDDD8D8
     case TileType.Player: return 0x5E5ED1
     case TileType.Monster: return 0x56D6C8

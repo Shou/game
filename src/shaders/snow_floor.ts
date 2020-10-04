@@ -84,11 +84,22 @@ vec2 rand2(vec2 co) {
   return vec2(n0, rand(vec2(n0)));
 }
 
+float snowCurve(float x) {
+  return (sin(.3 * x) + sin(.6 * x) + sin(x * .01)) * 0.1 + 0.5;
+}
+
 float cracks(vec2 coord, vec2 chunk) {
   vec2 c = coord;
 
   vec2 gv = fract(c) - .5;
   vec2 id = floor(chunk);
+
+  // TODO smoothstep
+  // TODO add drop shadow?
+  float dc = gv.y - snowCurve(id.x + gv.x);
+  if (gv.y < snowCurve(id.x + gv.x) - 0.75) {
+    return 1.0;
+  }
 
   float minDist = 100.0;
 
@@ -114,10 +125,13 @@ void main() {
   vec2 c = vTextureCoord;
 
   vec3 color = vec3(0.2, 0.8, 0.9);
-  //vec3 color = vec3(0.0);
 
   color += cracks(c, uChunk);
 
-  gl_FragColor += vec4(color, 0.85);
+  if (color.x >= .95 && color.y >= .95 && color.z >= .95) {
+    gl_FragColor += vec4(color, 1.);
+  } else {
+    gl_FragColor += vec4(color, .85);
+  }
 }
 `

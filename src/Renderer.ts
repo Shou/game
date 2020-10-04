@@ -5,20 +5,22 @@ import * as Ecsy from "ecsy"
 
 //import * as Color from "./Color"
 import * as Chunks from "./Chunks"
-import * as Shader from "./Shader"
 import {
   Coord,
   X, Y,
+  toCantor,
 } from "./Math"
 import * as Map from "./MapLoader"
+import * as Color from "./Color"
 
 import testMap from "./map-test"
 
-import * as Snow from "./shaders/snow"
+import * as SnowFall from "./shaders/snow_fall"
+import * as SnowFloor from "./shaders/snow_floor"
 import * as Ice from "./shaders/ice"
-
-import topGroundPng from "../assets/TopGround.png"
-import groundPng from "../assets/Ground.png"
+import * as DeepIce from "./shaders/deep_ice"
+import * as Concrete from "./shaders/concrete"
+import * as GlobalLight from "./shaders/global_light"
 
 
 const {
@@ -42,11 +44,11 @@ interface Pixi {
 interface App {
   pixi: Pixi
   world: Matter.World
-  chunks: Chunks.Chunks<any>
+  chunks: Chunks.Chunks<AnyElem>
 }
 
 // smoke unsafe code every day 420
-type Shape = any
+type Shape = any & { readonly U: unique symbol }["U"]
 type Graphics = any
 
 type LightUniform = [
@@ -75,6 +77,10 @@ interface Elem {
   loaded: boolean
 }
 
+type AnyElem = Elem & {
+  [key: string]: any
+}
+
 interface StaticElem extends Elem {
   type: "Static"
   uniform: BlockUniform
@@ -97,45 +103,41 @@ let us: Record<string, Record<string, any>>
   = {}
 
 
-type mkElem = (app: App, shape: Shape, color: number | string) => Elem
-const mkElem: mkElem = (app, shape, color) => {
+type MkElemOptions = {
+  color?: number
+  alpha?: number
+  sprite?: string
+}
+type mkElem = (app: App, shape: Shape, options: MkElemOptions) => Elem
+const mkElem: mkElem = (app, shape, {
+  color = 0xFFFFFF,
+  alpha = 1.0,
+  sprite = null,
+}) => {
   let graphics: any = null
-  if (typeof color === "number") {
+  if (sprite === null) {
     graphics = new Pixi.Graphics()
-    graphics.beginFill(color, 1)
-    graphics.drawShape({ ...shape, x: 0, y: 0 })
+    graphics.beginFill(color, alpha)
+    graphics.drawShape({ ...shape, x: -shape.width * 0.5, y: -shape.height * 0.5 })
     graphics.endFill()
   } else {
-    graphics = Pixi.Sprite.from(color)
+    graphics = Pixi.Sprite.from(sprite)
     graphics.width = 64
     graphics.height = 64
   }
   graphics.x = shape.x
   graphics.y = shape.y
 
-  let body
-  if ("width" in shape && "height" in shape) {
-    body = Matter.Bodies.rectangle(
-      // there's definitely something wrong here, probably to do with the player???
-      shape.x,
-      shape.y,
-      shape.width,
-      shape.height,
-      {
-        //inertia: Infinity,
-      }
-    )
-  } else {
-    // wtf
-    body = Matter.Bodies.circle(
-      shape.x,
-      shape.y,
-      shape.radius,
-      {
-        //inertia: Infinity,
-      }
-    )
-  }
+  const body = Matter.Bodies.rectangle(
+    // there's definitely something wrong here, probably to do with the player???
+    shape.x,
+    shape.y,
+    shape.width,
+    shape.height,
+    {
+      //inertia: Infinity,
+    }
+  )
   Matter.Body.setStatic(body, true)
 
   return {
@@ -148,16 +150,16 @@ const mkElem: mkElem = (app, shape, color) => {
 
 type mkEntity = (app: App, shape: Shape, color: number) => Entity
 const mkEntity: mkEntity = (app, shape, color) => {
-  const uniform = getRectVertices(
-    shape,
-    app.pixi.app.view.width,
-    app.pixi.app.view.height,
-  )
-
-  const elem = mkElem(app, shape, color)
+  const elem = mkElem(app, shape, { color })
   Matter.Body.setStatic(elem.body, false)
   elem.body.friction = 0.01
   elem.body.frictionAir = 0.01
+
+  const uniform = getRectVertices(
+    elem.body,
+    app.pixi.app.view.width,
+    app.pixi.app.view.height,
+  )
 
   return {
     type: "Entity",
@@ -168,20 +170,36 @@ const mkEntity: mkEntity = (app, shape, color) => {
   }
 }
 
-type mkLight = (app: App, shape: Shape, color: number) => Light
-const mkLight: mkLight = (app, shape, color) => {
-  const elem = mkElem(app, shape, color)
+type MkLightOptions = MkElemOptions & {
+  strength: number
+}
+type mkLight = (app: App, shape: Shape, options: MkLightOptions) => Light
+const mkLight: mkLight = (app, shape, options) => {
+  const {
+    strength,
+    color = 0xFFFFFF,
+  } = options
+
+  const elem = mkElem(app, shape, options as MkElemOptions)
+
+  const rx = "radius" in shape
+    ? shape.radius
+    : sqrt(pow(shape.width, 2) * 2) / 2
+
+  const ry = "radius" in shape
+    ? shape.radius
+    : sqrt(pow(shape.height, 2) * 2) / 2
 
   const uniform: LightUniform = [
     // Position
-    elem.shape.x / app.pixi.app.view.width,
-    elem.shape.y / app.pixi.app.view.height,
+    elem.body.position.x / app.pixi.app.view.width,
+    elem.body.position.y / app.pixi.app.view.height,
     0,
     // Shape
-    shape.radius / app.pixi.app.view.width,
-    shape.radius / app.pixi.app.view.height,
-    // Lighth / distance traveled
-    0.1,
+    rx / app.pixi.app.view.width,
+    ry / app.pixi.app.view.height,
+    // Strength / distance traveled as fraction of 1.0
+    strength,
     // Color
     (color >> 16) / 255,
     (color >> 8 & 0xFF) / 255,
@@ -221,13 +239,13 @@ const unloadElem: unloadElem = (app, elem) => {
   )
 }
 
-type getRectVertices = (rect: any, w: number, h: number) => BlockUniform
-const getRectVertices: getRectVertices = (rect, w, h) => {
+type getRectVertices = (body: Matter.Body, w: number, h: number) => BlockUniform
+const getRectVertices: getRectVertices = (body, w, h) => {
   return [
-    rect.left / w,
-    rect.top / h,
-    rect.right / w,
-    rect.bottom / h,
+    body.bounds.min.x / w,
+    body.bounds.min.y / h,
+    body.bounds.max.x / w,
+    body.bounds.max.y / h,
   ]
 }
 
@@ -266,12 +284,13 @@ const accelerate: accelerate = (entity) => {
   }
 }
 
-type move = (entity: Elem, x: number, y: number) => void
-const move: move = (entity, x, y) => {
+type move = (entity: Elem, x: number, y: number, a: number) => void
+const move: move = (entity, x, y, a) => {
   entity.graphics.x = x
   entity.graphics.y = y
   entity.shape.x = x
   entity.shape.y = y
+  entity.graphics.angle = a
 }
 
 type movement = (entity: Elem) => void
@@ -280,6 +299,7 @@ const movement: movement = (entity) => {
     entity,
     entity.body.position.x,
     entity.body.position.y,
+    entity.body.angle,
   )
 }
 
@@ -310,12 +330,34 @@ const tileToElem: tileToElem = (app, tile) => {
   switch (tile.type) {
     case Map.TileType.StrongLight: {
       const shape: Shape = new Pixi.Circle(x, y, 32)
-      return mkLight(app, shape, color)
+      const elem = mkLight(app, shape, {
+        color,
+        strength: 1.0,
+      })
+
+      Chunks.append(
+        app.chunks,
+        Chunks.toCoord(elem.body.position as Coord),
+        [elem],
+      )
+
+      return elem
     }
 
     case Map.TileType.WeakLight: {
-      const shape: Shape = new Pixi.Rectangle(x, y, 64, 2 * 64)
-      return mkLight(app, shape, color)
+      const shape: Shape = new Pixi.Rectangle(x, y, 64, 64)
+      const elem = mkLight(app, shape, {
+        color,
+        strength: 0.5,
+      })
+
+      Chunks.append(
+        app.chunks,
+        Chunks.toCoord(elem.body.position as Coord),
+        [elem],
+      )
+
+      return elem
     }
 
     case Map.TileType.Player: {
@@ -333,56 +375,141 @@ const tileToElem: tileToElem = (app, tile) => {
 
     case Map.TileType.TopGround: {
       const shape = new Pixi.Rectangle(x, y, 64, 64)
-      const elem = mkElem(app, shape, color)
+      const elem = mkElem(app, shape, { color })
+
+      const chunk = [x, y].map(n => floor(n / 64))
+      const cantor = toCantor({ x, y } as Chunks.Coord)
+      us["snowFloor" + cantor] = {
+        uTime: 0,
+        uChunk: chunk,
+      }
+      elem.graphics.filters = [
+        new Pixi.Filter(SnowFloor.vertex, SnowFloor.fragment, us["snowFloor" + cantor])
+      ]
+
+      const staticElem: StaticElem = {
+        type: "Static",
+        ...elem,
+        uniform: getRectVertices(elem.body, app.pixi.app.view.width, app.pixi.app.view.height),
+      }
+
       Chunks.append(
         app.chunks,
         Chunks.toCoord(elem.body.position as Coord),
-        [elem],
+        [staticElem],
       )
-      return {
-        type: "Static",
-        ...elem,
-        uniform: getRectVertices(elem.shape, app.pixi.app.view.width, app.pixi.app.view.height),
-      }
+
+      return staticElem
     }
 
     case Map.TileType.Ground: {
       const shape = new Pixi.Rectangle(x, y, 64, 64)
-      const elem = mkElem(app, shape, color)
-      elem.graphics.cacheAsBitmap = false
+      const elem = mkElem(app, shape, {
+        color,
+        alpha: 0,
+      })
 
-      us.ice = {
-        uTime: 0
+      const chunk = [x, y].map(n => floor(n / 64))
+      const cantor = toCantor({ x, y } as Chunks.Coord)
+      us["ice" + cantor] = {
+        uTime: 0,
+        uChunk: chunk,
       }
       elem.graphics.filters = [
-        new Pixi.Filter(Ice.vertex, Ice.fragment, us.ice)
+        new Pixi.Filter(Ice.vertex, Ice.fragment, us["ice" + cantor])
       ]
+
+      const staticElem: StaticElem = {
+        type: "Static",
+        ...elem,
+        uniform: getRectVertices(elem.body, app.pixi.app.view.width, app.pixi.app.view.height),
+      }
 
       Chunks.append(
         app.chunks,
         Chunks.toCoord(elem.body.position as Coord),
-        [elem],
+        [staticElem],
       )
-      return {
+
+      return staticElem
+    }
+
+    case Map.TileType.DeepGround: {
+      const shape = new Pixi.Rectangle(x, y, 64, 64)
+      const elem = mkElem(app, shape, { color })
+
+      us.deepIce = {
+        uTime: 0,
+        uChunk: 0,
+      }
+      elem.graphics.filters = [
+        new Pixi.Filter(DeepIce.vertex, DeepIce.fragment, us.deepIce)
+      ]
+
+      const staticElem: StaticElem = {
         type: "Static",
         ...elem,
-        uniform: getRectVertices(elem.shape, app.pixi.app.view.width, app.pixi.app.view.height),
+        uniform: getRectVertices(elem.body, app.pixi.app.view.width, app.pixi.app.view.height),
       }
+
+      Chunks.append(
+        app.chunks,
+        Chunks.toCoord(elem.body.position as Coord),
+        [staticElem],
+      )
+
+      return staticElem
+    }
+
+    case Map.TileType.Concrete: {
+      const shape = new Pixi.Rectangle(x, y, 64, 64)
+      const elem = mkElem(app, shape, {
+        color,
+        alpha: 0,
+      })
+
+      const chunk = [x, y].map(n => floor(n / 64))
+      const cantor = toCantor({ x, y } as Chunks.Coord)
+      us["concrete" + cantor] = {
+        uTime: 0,
+        uChunk: chunk,
+      }
+      elem.graphics.filters = [
+        new Pixi.Filter(Concrete.vertex, Concrete.fragment, us["concrete" + cantor])
+      ]
+
+      const staticElem: StaticElem = {
+        type: "Static",
+        ...elem,
+        uniform: getRectVertices(elem.body, app.pixi.app.view.width, app.pixi.app.view.height),
+      }
+
+      Chunks.append(
+        app.chunks,
+        Chunks.toCoord(elem.body.position as Coord),
+        [staticElem],
+      )
+
+      return staticElem
     }
 
     default: {
       const shape = new Pixi.Rectangle(x, y, 64, 64)
-      const elem = mkElem(app, shape, color)
+      const elem = mkElem(app, shape, { color })
+
+      const staticElem: StaticElem = {
+        type: "Static",
+        ...elem,
+        uniform: getRectVertices(elem.body, app.pixi.app.view.width, app.pixi.app.view.height),
+      }
+
       Chunks.append(
         app.chunks,
         Chunks.toCoord(elem.body.position as Coord),
-        [elem],
+        [staticElem],
       )
-      return {
-        type: "Static",
-        ...elem,
-        uniform: getRectVertices(elem.shape, app.pixi.app.view.width, app.pixi.app.view.height),
-      }
+
+      return staticElem
     }
   }
 }
@@ -454,9 +581,11 @@ export const main: main = (view, pausedState) => {
   //   r, g, b ]
   // We can use middle as glossiness... maybe
   const uniforms = {
-      rects: [] as Array<number>,
-      entities: [] as Array<number>,
-      lights: [] as Array<number>,
+    rects: new Array(1024) as Array<number>,
+    num_rects: 0,
+    lights: new Array(1024) as Array<number>,
+    num_lights: 0,
+    view: [0, 0] as [number, number],
   }
 
   const worldMap = Map.parseText(testMap)
@@ -478,38 +607,22 @@ export const main: main = (view, pausedState) => {
     uWorldX: 0,
   }
   bgGraphics.filters = [
-    new Pixi.Filter(Snow.vertex, Snow.fragment, us.background) as any
+    new Pixi.Filter(SnowFall.vertex, SnowFall.fragment, us.background) as any
   ]
   viewport.addChild(bgGraphics)
 
   let players: Array<Entity> = []
 
   const elems = worldMap.map(tile => tileToElem(app, tile))
+  console.log(elems, "elems")
   elems.forEach(elem => {
-    switch (elem.type) {
-      case "Light": {
-        elem.uniform.forEach(
-          u => uniforms.lights[uniforms.lights.length] = u
-        )
-        break
-      }
-
-      case "Entity": {
-        if (elem.control === "Controlled") {
-          entities.push(elem)
-          players.push(elem)
-        } else {
-          entities.push(elem)
-          npcs.push(elem)
-        }
-        break
-      }
-
-      default: {
-        elem.uniform.forEach(
-          u => uniforms.rects[uniforms.rects.length] = u
-        )
-        break
+    if (elem.type === "Entity") {
+      if (elem.control === "Controlled") {
+        entities.push(elem)
+        players.push(elem)
+      } else {
+        entities.push(elem)
+        npcs.push(elem)
       }
     }
   })
@@ -520,17 +633,18 @@ export const main: main = (view, pausedState) => {
     throw new Error("No Player placed on the map, please put a 'P' somewhere.")
   }
 
-  if (uniforms.lights.length === 0) {
-    for (let i = 0; i < 9; i++) uniforms.lights[i] = 0
-  }
+  // We need _something_ in these uniforms or things explode
+  for (let i = 0; i < 4; i++) uniforms.rects[i] = 0
+  for (let i = 0; i < 9; i++) uniforms.lights[i] = 0
 
-  const vertexLight = Shader.vertexLight()
-  const fragmentLight = Shader.fragmentLight(
-    round(uniforms.rects.length * 0.25),
-    round(uniforms.lights.length / 3 / 3),
-  )
-  //const shader = new Pixi.Filter(vertexLight, fragmentLight, uniforms) as any
-  //pixiApp.stage.filters = [shader]
+  const shader = new Pixi.Filter(
+    GlobalLight.vertex,
+    GlobalLight.fragment,
+      //round(uniforms.rects.length / 4),
+      //round(uniforms.lights.length / 3 / 3),
+    uniforms,
+  ) as any
+  pixiApp.stage.filters = [shader]
 
   pixiApp.ticker.autoStart = false
 
@@ -538,6 +652,18 @@ export const main: main = (view, pausedState) => {
   const physicsTick = 5
 
   let evil = { x: [0], y: [0] }
+
+  console.log(us, "universals")
+
+  // uniform counts
+  interface counts {
+    lights: number,
+    rects: number,
+  }
+  const counts: counts = {
+    lights: 0,
+    rects: 0,
+  }
 
   // NOTE We can use app.ticker.start/stop() for pausing
   pixiApp.ticker.add(() => {
@@ -557,18 +683,60 @@ export const main: main = (view, pausedState) => {
       viewport.screenWorldWidth + 256,
       viewport.screenWorldHeight + 256,
     )
+
+    for (const key in counts) {
+      counts[key as keyof counts] = 0
+      uniforms[key as keyof counts] = []
+    }
+
+    const playerAABB = getRectVertices(
+      player.body,
+      app.pixi.app.view.width,
+      app.pixi.app.view.height,
+    )
+    for (const u of playerAABB) {
+      uniforms.rects[uniforms.rects.length] = u
+      counts.rects++
+    }
+
     for (const elem of screenElems) {
       if (!elem.loaded) {
         loadElem(app, elem)
       }
+
+      switch (elem.type) {
+        case "Light": {
+          for(const u of (elem as Light).uniform) {
+            uniforms.lights[uniforms.lights.length] = u
+            counts.lights++
+          }
+          break
+        }
+
+        case "Static": {
+          console.log(elem, elem.type)
+          for (const u of (elem as StaticElem).uniform) {
+            uniforms.rects[uniforms.rects.length] = u
+            counts.rects++
+          }
+          break
+        }
+      }
     }
-    // TODO why is this commented
-    //for (const key in loadedElems) {
-    //  const elem = loadedElems[key][0]
-    //  if (!screenElems.includes(elem)) {
-    //    unloadElem(app, elem)
-    //  }
-    //}
+
+    for (const key in counts) {
+      (uniforms as any)["num_" + key] = counts[key as keyof counts]
+    }
+
+    console.log(uniforms, "uniforms")
+    // TODO why is/was this commented
+    // :shrug:
+    for (const key in loadedElems) {
+      const elem = loadedElems[key][0]
+      if (!screenElems.includes(elem)) {
+        unloadElem(app, elem)
+      }
+    }
 
     accelerate(player)
 
@@ -613,14 +781,10 @@ export const main: main = (view, pausedState) => {
         entity.airborne = true
       }
 
-      const vsEntity = getRectVertices(entity.shape, pixiApp.view.width, pixiApp.view.height)
-      for (let i = 0; i < 4; i++) {
-        uniforms.entities[i] = vsEntity[i]
-      }
-
       movement(entity)
     }
 
+    // Smooth delayed viewport movement
     // TODO move evil state somewhere... less static. model state somehow
     const mx = evil.x.reduce((acc, a) => a + acc, 0) / evil.x.length
     const my = evil.y.reduce((acc, a) => a + acc, 0) / evil.y.length
@@ -639,7 +803,11 @@ export const main: main = (view, pausedState) => {
     bgGraphics.x = viewport.left
     bgGraphics.y = viewport.top
     us.background.uWorldX = viewport.left / 1000
-    console.log(us.background.uWorldX, "uWorldX")
+
+    uniforms.view = [
+      viewport.left / pixiApp.view.width,
+      viewport.top / pixiApp.view.height,
+    ]
   })
 
   // TODO polling is bad and we should use listeners

@@ -8,6 +8,7 @@ mkDerivation rec {
 
   buildInputs = (with pkgs; [
     nodejs-13_x
+    tiled
   ]);
 
   LD_LIBRARY_PATH = "${pkgs.libuuid.out}/lib";

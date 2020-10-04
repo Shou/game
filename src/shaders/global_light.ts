@@ -1,4 +1,4 @@
-export const vertexLight = () => `
+export const vertex = `
 attribute vec2 aVertexPosition;
 
 uniform mat3 projectionMatrix;
@@ -23,15 +23,24 @@ void main() {
 }
 `
 
-export const fragmentLight = (rects: number, lights: number) => `
-precision mediump float;
+export const fragment = `
 
+#define MAX_RECTS 256
+#define MAX_LIGHTS 113
+
+precision mediump float;
 varying vec2 vTextureCoord;
 
-// left X, top Y, right X, bottom Y
-uniform vec4 rects[${rects}];
-uniform mat3 lights[${lights}];
 uniform sampler2D uSampler;
+// left X, top Y, right X, bottom Y
+// 1024 / 4 = 256 blocks
+uniform vec4 rects[256];
+uniform int num_rects;
+// floor(1024 / 9) = 113 lights
+uniform mat3 lights[113];
+uniform int num_lights;
+// Absolute (world) viewport position
+uniform vec2 view;
 
 vec2 lineIntersect(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
   float divisor = (p1.x - p2.x) * (p3.y - p4.y) - (p1.y - p2.y) * (p3.x - p4.x);
@@ -49,9 +58,10 @@ vec2 lineIntersect(vec2 p1, vec2 p2, vec2 p3, vec2 p4) {
 }
 
 // TODO check if angle can actually hit the side
-vec3 lineRectIntersection(float angle, vec2 p1, vec2 p2, vec4 rect) {
-  // TODO Maybe we should precompute this
-  vec2 normal = vec2(cos(angle), sin(angle));
+vec3 lineRectIntersection(vec2 normal, vec2 p1, vec2 p2, vec4 rect) {
+  if (dot(normal, vec2(cos(p1.x - p2.x), sin(p1.y - p2.y))) <= 0.0) {
+    return vec3(-1.0);
+  }
 
   vec2 isTop = lineIntersect(p1, p2, rect.xy, rect.zy);
   if (isTop.x != -1.0) {
@@ -117,30 +127,35 @@ float angleFromTo(vec2 p1, vec2 p2) {
   return atan(diff.y, diff.x);
 }
 
-float diagonalLength(vec2 p) {
-  return sqrt(abs(p.x * p.x + p.y * p.y));
-}
-
 bool rectContains(vec4 rect, vec2 point) {
   return rect.x <= point.x && point.x <= rect.z && rect.y <= point.y && point.y <= rect.w;
 }
 
 // TODO Glass: reflect and refract
 vec3 castLightRay(mat3 origin, vec2 point) {
-  const int rectQuantity = ${rects};
   const int maxDepth = 2;
 
-  float radiusX = origin[1].x;
-  float radiusY = origin[1].y;
+  // Adjust for where the viewport is in the world
+  origin[0].x -= view.x;
+  origin[0].y -= view.y;
+
+  // Limit the light distance
+  float maxStrength = origin[1].z;
+  if (length(origin[0].xy - point) > maxStrength) {
+    return vec3(0.);
+  }
+
+  vec2 radius = origin[1].xy;
   float angle = angleFromTo(origin[0].xy, point);
-  vec2 stateOrigin = origin[0].xy + vec2(cos(angle) * radiusX, sin(angle) * radiusY);
+  vec2 normalAngle = vec2(cos(angle), sin(angle));
+  vec2 stateOrigin = origin[0].xy + normalAngle * radius;
   vec2 statePoint = point;
 
   float lightIntensity = origin[1].z;
   vec3 lightColor = origin[2];
 
   // TODO wtf this dont work??? (forcibly false for now)
-  if (diagonalLength(stateOrigin - statePoint) < min(radiusX, radiusY) * 0.02 && false) {
+  if (length(stateOrigin - statePoint) < min(radius.x, radius.y) * 0.02 && false) {
     // We be inside the light son
     return lightColor * lightIntensity;
   }
@@ -151,18 +166,21 @@ vec3 castLightRay(mat3 origin, vec2 point) {
     vec2 interPoint = vec2(-1.0);
     float reflectionAngle = angle;
 
-    for (int i = 0; i < rectQuantity; i++) {
+    for (int i = 0; i < MAX_RECTS; i++) {
+      if (i > num_rects) break;
+      // Also adjust for where the viewport is in the world
+      vec4 relRect = rects[i] - vec4(view, view);
       // We can probably restrict the lines in the rects to 2 instead of 4 using
       // the angle of origin-point.
-      vec3 inter = lineRectIntersection(angle, stateOrigin, statePoint, rects[i]);
+      vec3 inter = lineRectIntersection(normalAngle, stateOrigin, statePoint, relRect);
 
       if (inter.x != -1.0) {
-        float distance = diagonalLength(statePoint - stateOrigin);
+        float distance = length(statePoint - stateOrigin);
 
         if (distance < minDist) {
           interPoint = inter.xy;
           reflectionAngle = inter.z;
-          rect = rects[i];
+          rect = relRect;
           minDist = distance;
         }
       }
@@ -170,9 +188,8 @@ vec3 castLightRay(mat3 origin, vec2 point) {
 
     // Didn't hit anything lol
     if (rect.x == -1.0) {
-      float distance = diagonalLength(stateOrigin - statePoint) / lightIntensity;
-      float strength = max(0.0, pow(0.368, distance));
-      return strength * lightColor;
+      float strength = length(stateOrigin - statePoint) / maxStrength;
+      return (1. - pow(strength, 1. / 2.)) * lightColor;
     }
 
     bool isInsideRect = rectContains(rect, statePoint);
@@ -185,7 +202,7 @@ vec3 castLightRay(mat3 origin, vec2 point) {
       continue;
     }
 
-    float distance = diagonalLength(stateOrigin - interPoint) / lightIntensity;
+    float distance = length(stateOrigin - interPoint) / lightIntensity;
     float strength = max(0.0, pow(0.368, distance));
 
     if (isInsideRect) {
@@ -194,15 +211,19 @@ vec3 castLightRay(mat3 origin, vec2 point) {
 
     return vec3(0.0);
 
-    vec2 start = vec2(interPoint.x + cos(angle) * 0.001, interPoint.y + sin(angle) * 0.001);
-    vec2 end = vec2(cos(angle) * 2.0, sin(angle) * 2.0);
+    vec2 start = interPoint + normalAngle * 0.001;
+    vec2 end = normalAngle * 2.0;
 
     // XXX We can use this to do diffuse lighting and this is how.txt:
     // - We have inerPoint which is _outside_ the rect we're inside, so we can
     //   easily reflect and check for other rects in that direction, and obtain
     //   the colour of that rect, and return that mixed with original colour.
-    for (int i = 0; i < rectQuantity; i++) {
-      vec3 inter = lineRectIntersection(angle, start, end, rects[i]);
+    for (int i = 0; i < MAX_RECTS; i++) {
+      if (i > num_rects) break;
+
+      // yet again adjust for where the viewport is in the world
+      vec4 relRect = rects[i] - vec4(view, view);
+      vec3 inter = lineRectIntersection(normalAngle, start, end, relRect);
 
       if (inter.x != -1.0) {
         return vec3(0.0);
@@ -231,19 +252,18 @@ vec3 blendSoftLight(vec3 colorA, vec3 colorB) {
 void main() {
   gl_FragColor = texture2D(uSampler, vTextureCoord);
 
-  const int rectQuantity = ${rects};
-  const int lightQuantity = ${lights};
-
-  vec4 darkness = vec4(gl_FragColor.xyz * 0.3, gl_FragColor.w);
+  vec4 darkness = vec4(gl_FragColor.rgb * 0.05, gl_FragColor.w);
   vec4 color = gl_FragColor;
 
   bool lit = false;
-  for (int i = 0; i < lightQuantity; i++) {
+  for (int i = 0; i < MAX_LIGHTS; i++) {
+    if (i > num_lights) break;
+
     vec3 lightColor = castLightRay(lights[i], vTextureCoord);
     if (lightColor != vec3(0.0)) {
       lit = true;
-      color = gl_FragColor;
-      // color = vec4(blendScreen(color.xyz, lightColor), color.w);
+      //color = max(color, vec4(lightColor, color.w) * gl_FragColor);
+      color = vec4(blendScreen(color.xyz, lightColor), color.w);
     }
   }
 

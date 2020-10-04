@@ -84,40 +84,38 @@ vec2 rand2(vec2 co) {
   return vec2(n0, rand(vec2(n0)));
 }
 
-float cracks(vec2 coord, vec2 chunk) {
+float texture(vec2 coord, vec2 chunk) {
   vec2 c = coord;
 
   vec2 gv = fract(c) - .5;
   vec2 id = floor(chunk);
 
-  float minDist = 100.0;
-
-  for (float i = -1.0; i <= 1.0; i++) {
-    for (float j = -1.0; j <= 1.0; j++) {
-      vec2 offset = vec2(i, j);
-
-      vec2 n = rand2(id + offset);
-      vec2 p = offset + sin(n) * 0.5;
-      float d = length(gv - p);
-
-      if (d < minDist) {
-        minDist = d;
-      }
-    }
+  // TODO smoothstep
+  // TODO add drop shadow?
+  float dc = gv.y - snowCurve(id.x + gv.x);
+  if (gv.y < snowCurve(id.x + gv.x) - 0.75) {
+    return 1.0;
   }
 
-  return minDist;
+  float minDist = 100.0;
+
+  vec2 offset = vec2(i, j);
+
+  vec2 n = rand2(id + offset);
+  vec2 p = offset + sin(n) * 0.5;
+  float d = length(gv - p);
+
+  return 1.0;
 }
 
 void main() {
   gl_FragColor = texture2D(uSampler, vTextureCoord);
   vec2 c = vTextureCoord;
 
-  vec3 color = vec3(0.2, 0.8, 0.9);
-  //vec3 color = vec3(0.0);
+  vec3 color = vec3(0.5, 0.5, 0.5);
 
-  color += cracks(c, uChunk);
+  color += texture(c, uChunk);
 
-  gl_FragColor += vec4(color, 0.85);
+  gl_FragColor += vec4(color, 1.);
 }
 `

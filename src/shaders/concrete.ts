@@ -84,40 +84,27 @@ vec2 rand2(vec2 co) {
   return vec2(n0, rand(vec2(n0)));
 }
 
-float cracks(vec2 coord, vec2 chunk) {
+float texture(vec2 coord, vec2 chunk) {
   vec2 c = coord;
 
-  vec2 gv = fract(c) - .5;
-  vec2 id = floor(chunk);
+  vec2 n = rand2(chunk + c);
+  vec2 p = sin(n) * 0.1;
+  float d = length(p);
 
-  float minDist = 100.0;
-
-  for (float i = -1.0; i <= 1.0; i++) {
-    for (float j = -1.0; j <= 1.0; j++) {
-      vec2 offset = vec2(i, j);
-
-      vec2 n = rand2(id + offset);
-      vec2 p = offset + sin(n) * 0.5;
-      float d = length(gv - p);
-
-      if (d < minDist) {
-        minDist = d;
-      }
-    }
-  }
-
-  return minDist;
+  return d;
 }
 
 void main() {
   gl_FragColor = texture2D(uSampler, vTextureCoord);
   vec2 c = vTextureCoord;
 
-  vec3 color = vec3(0.2, 0.8, 0.9);
-  //vec3 color = vec3(0.0);
+  vec3 color = vec3(0.75, 0.75, 0.75);
 
-  color += cracks(c, uChunk);
+  float n = floor(c.x * 100.0);
+  color += sin(cos(n) * PI + cos(n) * cos(n)) * sin(n) * 0.05;
 
-  gl_FragColor += vec4(color, 0.85);
+  color += texture(c, uChunk);
+
+  gl_FragColor += vec4(color, 1.);
 }
 `

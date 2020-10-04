@@ -54,3 +54,12 @@ export const toHEXAlpha: (hsla: HSLA) => HEX
     const rgb = floor(255 * f(0) << 16) * floor(255 * f(8) << 8) * floor(255 * f(4))
     return { type: HEX, value: [rgb, alpha] }
   }
+
+export const numberToTuple: (color: number) => [number, number, number]
+  = (color) => {
+  return [
+    (color >> 16) / 255,
+    (color >> 8 & 0xFF) / 255,
+    (color & 0xFF) / 255,
+  ]
+}
